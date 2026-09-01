@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Testing and Coverage
+coverage/
+*.lcov
+
+# Build Outputs (isteğe bağlı: npm publish öncesi derlenen dist klasörü)
+# dist/
+
+# TypeScript Cache
+*.tsbuildinfo
+.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Editor & OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*~

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crafter Storefront Theme Demo</title>
+  <!-- Tailwind Play CDN for Demo Presentation -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Crafter SDK (Minified Browser Bundle) -->
+  <script src="../dist/crafter.min.js"></script>
+</head>
+<body class="bg-gray-50 font-sans text-gray-800 min-h-screen">
+
+  <!-- ===================== NAVBAR ===================== -->
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      
+      <!-- Logo & Sunucu Durumu -->
+      <div class="flex items-center space-x-4">
+        <a href="/" class="text-2xl font-black text-indigo-600 tracking-tight flex items-center gap-2">
+          <span>⚡ CRAFTER</span>
+        </a>
+        <div id="server-badge" class="hidden sm:flex items-center gap-2 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-xs font-semibold border border-emerald-200">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span id="server-online-text">Sunucu Durumu Yükleniyor...</span>
+        </div>
+      </div>
+
+      <!-- Canlı Autocomplete Arama Kutusu -->
+      <div class="relative flex-1 max-w-md">
+        <div class="relative">
+          <input
+            type="text"
+            id="search-input"
+            placeholder="Kullanıcı, ürün veya duyuru ara... (ör: vip)"
+            class="w-full bg-gray-100 border border-gray-200 rounded-xl px-4 py-2 pl-10 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+          />
+          <svg class="w-4 h-4 text-gray-400 absolute left-3 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
+
+        <!-- Arama Dropdown Sonuçları -->
+        <div id="search-dropdown" class="hidden absolute left-0 right-0 mt-2 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-50 divide-y divide-gray-50"></div>
+      </div>
+
+      <!-- Kullanıcı & Bakiye Alanı -->
+      <div class="flex items-center space-x-3">
+        <div class="bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-xl flex items-center gap-2">
+          <span class="text-xs font-bold text-indigo-500 uppercase tracking-wider">Bakiye</span>
+          <span id="header-balance" class="font-extrabold text-indigo-700 text-sm">-- TL</span>
+        </div>
+        <button id="btn-login" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-xl text-sm font-bold shadow-md shadow-indigo-100 transition-all">
+          Giriş Yap
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ===================== MAIN CONTENT ===================== -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+
+    <!-- In-Game /web Hızlı Giriş Bildirimi (Otomatik algılanır) -->
+    <div id="ingame-auth-alert" class="hidden bg-indigo-600 text-white p-4 rounded-2xl shadow-lg flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="text-2xl">🎮</span>
+        <div>
+          <h3 class="font-bold">Oyun İçi Hızlı Giriş Algılandı</h3>
+          <p class="text-xs text-indigo-100">Minecraft sunucusundan tek tıkla geldiniz, hesabınız otomatik bağlanıyor...</p>
+        </div>
+      </div>
+      <button id="btn-confirm-ingame" class="bg-white text-indigo-700 px-4 py-1.5 rounded-xl font-bold text-xs shadow hover:bg-indigo-50">
+        Onayla ve Devam Et
+      </button>
+    </div>
+
+    <!-- 1. Bölüm: Mağaza Vitrini & Anında Satın Alma -->
+    <section class="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-xl font-black text-gray-900 tracking-tight">🛒 Popüler Mağaza Ürünleri</h2>
+          <p class="text-sm text-gray-500">Site bakiyenizi kullanarak anında sunucunuza teslim alın.</p>
+        </div>
+        <span class="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-lg font-bold">
+          ⚡ Anında Otomatik Teslimat
+        </span>
+      </div>
+
+      <div id="products-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 pt-2">
+        <!-- Örnek Vitrin Kartı -->
+        <div class="border border-gray-100 bg-gray-50/50 rounded-2xl p-5 flex flex-col justify-between hover:shadow-md transition-shadow">
+          <div>
+            <div class="flex justify-between items-start mb-2">
+              <h3 class="font-bold text-gray-900 text-lg">VIP+ Paketi</h3>
+              <span class="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-md font-bold">30 Günlük</span>
+            </div>
+            <p class="text-xs text-gray-500 mb-4">Özel uçma yetkisi, 5 adet set ve sohbette sarı parlak unvan.</p>
+          </div>
+          <div class="pt-4 border-t border-gray-100 flex items-center justify-between">
+            <span class="text-lg font-black text-indigo-600">75 TL</span>
+            <button onclick="handlePurchase('prod-vip-plus')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-sm">
+              Hemen Satın Al
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Bölüm: Lexical Zengin Metin Duyurusu -->
+    <section class="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm space-y-4">
+      <div class="flex items-center justify-between border-b border-gray-100 pb-3">
+        <div>
+          <span class="text-xs font-bold uppercase text-indigo-600 tracking-wider">Son Güncelleme</span>
+          <h2 class="text-xl font-black text-gray-900 tracking-tight">Yeni Sezon & Orman Dünyası Açıldı!</h2>
+        </div>
+        <span class="text-xs text-gray-400">1 Eylül 2026</span>
+      </div>
+
+      <!-- Lexical HTML Buraya Enjekte Edilecek -->
+      <article id="lexical-announcement-body" class="prose max-w-none text-sm text-gray-700 leading-relaxed">
+        Yükleniyor...
+      </article>
+    </section>
+
+  </main>
+
+  <!-- ===================== JAVASCRIPT LOGIC ===================== -->
+  <script>
+    // 1. Crafter SDK Başlatma (Sıfır konfigürasyon: Otomatik Storefront Proxy Modu)
+    const crafter = new Crafter();
+
+    // 2. Canlı Sunucu Durumunu Çek
+    async function loadServerStatus() {
+      try {
+        const servers = await crafter.servers.getList();
+        if (servers && servers.length > 0) {
+          const mainServer = servers[0];
+          const badge = document.querySelector('#server-badge');
+          const text = document.querySelector('#server-online-text');
+          badge.classList.remove('hidden');
+          text.innerText = `${mainServer.name}: ${mainServer.onlinePlayers || 0} / ${mainServer.maxPlayers || 100} Oyuncu Aktif (${mainServer.ping || 18}ms)`;
+        }
+      } catch (err) {
+        console.warn('Sunucu durumu alınamadı:', err.message);
+      }
+    }
+
+    // 3. Kullanıcı Hafif Bakiyesini Çek
+    async function refreshUserBalance() {
+      try {
+        const balanceData = await crafter.users.getBalance('me');
+        document.querySelector('#header-balance').innerText = `${balanceData.balance} ${balanceData.currency || 'TL'}`;
+      } catch {
+        document.querySelector('#header-balance').innerText = 'Giriş Yapılmadı';
+      }
+    }
+
+    // 4. Navbar Canlı Autocomplete Arama (crafter.search)
+    const searchInput = document.querySelector('#search-input');
+    const searchDropdown = document.querySelector('#search-dropdown');
+    let searchDebounceTimer;
+
+    searchInput.addEventListener('input', (e) => {
+      clearTimeout(searchDebounceTimer);
+      const query = e.target.value.trim();
+
+      if (query.length < 2) {
+        searchDropdown.classList.add('hidden');
+        return;
+      }
+
+      searchDebounceTimer = setTimeout(async () => {
+        try {
+          const results = await crafter.search.metadataSearch(query, 5);
+          if (!results || results.length === 0) {
+            searchDropdown.innerHTML = '<div class="p-4 text-xs text-gray-400 text-center">Sonuç bulunamadı</div>';
+            searchDropdown.classList.remove('hidden');
+            return;
+          }
+
+          searchDropdown.innerHTML = results.map(item => `
+            <div class="p-3 hover:bg-gray-50 flex items-center justify-between cursor-pointer transition-colors">
+              <div class="flex items-center gap-3">
+                <span class="text-xs uppercase font-bold px-2 py-0.5 rounded bg-gray-100 text-gray-600">${item.type}</span>
+                <div>
+                  <div class="text-sm font-bold text-gray-900">${item.name}</div>
+                  <div class="text-xs text-gray-400">${item.subtitle || ''}</div>
+                </div>
+              </div>
+              <span class="text-xs text-indigo-600 font-semibold">Görüntüle →</span>
+            </div>
+          `).join('');
+          searchDropdown.classList.remove('hidden');
+        } catch (err) {
+          console.error('Arama hatası:', err);
+        }
+      }, 250);
+    });
+
+    // 5. Bakiye ile Ürün Satın Alma (crafter.cart)
+    async function handlePurchase(productId) {
+      if (!confirm('Bu ürünü satın almak istiyor musunuz?')) return;
+
+      try {
+        const res = await crafter.cart.purchase({ productIds: [productId] });
+        alert('Tebrikler: ' + res.message);
+      } catch (err) {
+        alert('Satın alım başarısız: ' + err.message);
+      }
+    }
+
+    // 6. Lexical Zengin Metin Örneğini Render Et (crafter.utils.lexicalToHtml)
+    function renderLexicalAnnouncement() {
+      // Örnek bir Lexical AST nesnesi (Backend'den gelen veri)
+      const mockLexicalPost = {
+        root: {
+          type: 'root',
+          children: [
+            {
+              type: 'paragraph',
+              children: [
+                { type: 'text', text: 'Değerli oyuncularımız, ', format: 0 },
+                { type: 'text', text: '1.20 Survival Orman Dünyası', format: 1 }, // Bold
+                { type: 'text', text: ' bugün saat 20:00 itibarıyla resmi olarak açılmıştır!', format: 0 }
+              ]
+            },
+            {
+              type: 'list',
+              listType: 'bullet',
+              children: [
+                {
+                  type: 'listitem',
+                  children: [
+                    { type: 'text', text: 'Yeni özel madenler ve zindanlar eklendi.', format: 0 }
+                  ]
+                },
+                {
+                  type: 'listitem',
+                  children: [
+                    { type: 'text', text: 'Tüm mağaza alışverişlerinde ', format: 0 },
+                    { type: 'text', text: '%25 açılış indirimi', format: 1 | 8 }, // Bold + Underline
+                    { type: 'text', text: ' başladı!', format: 0 }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      };
+
+      // SDK Lexical motoruyla HTML'e çevir:
+      const html = crafter.utils.lexicalToHtml(mockLexicalPost);
+      document.querySelector('#lexical-announcement-body').innerHTML = html;
+    }
+
+    // 7. Oyun İçi (/web) Hızlı Giriş Kontrolü
+    async function checkInGameLogin() {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('username') && params.get('uuid') && params.get('hash')) {
+        document.querySelector('#ingame-auth-alert').classList.remove('hidden');
+        document.querySelector('#btn-confirm-ingame').addEventListener('click', async () => {
+          try {
+            await crafter.auth.inGameAuth();
+            alert('Giriş başarılı! Hoş geldiniz.');
+            window.location.href = window.location.pathname; // Parametreleri temizle
+          } catch (err) {
+            alert('Giriş başarısız: ' + err.message);
+          }
+        });
+      }
+    }
+
+    // ===================== REAKTİF EVENT LİSTENERLAR =====================
+    // Satın alım tamamlandığında header bakiyesini otomatik yenile:
+    crafter.on('cart:purchased', (order) => {
+      console.log('⚡ cart:purchased olayı yakalandı:', order);
+      refreshUserBalance();
+    });
+
+    // Başka bir oyuncuya bakiye transfer edildiğinde:
+    crafter.on('balance:sent', (transfer) => {
+      console.log('⚡ balance:sent olayı yakalandı:', transfer);
+      refreshUserBalance();
+    });
+
+    // Sayfa Yüklendiğinde Başlat
+    window.addEventListener('DOMContentLoaded', () => {
+      loadServerStatus();
+      refreshUserBalance();
+      renderLexicalAnnouncement();
+      checkInGameLogin();
+    });
+  </script>
+
+</body>
+</html>
