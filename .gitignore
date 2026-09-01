@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+.wiki-repo/
 /.pnp
 .pnp.js
 
