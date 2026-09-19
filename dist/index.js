@@ -769,9 +769,11 @@ var CartModule = class {
    */
   async purchase(data) {
     const payload = {
-      productIds: data.productIds,
       coupon: data.coupon || data.couponCode || null
     };
+    if (data.productIds !== void 0) payload.productIds = data.productIds;
+    if (data.items !== void 0) payload.items = data.items;
+    if (data.quantities !== void 0) payload.quantities = data.quantities;
     const response = await this.http.post("/marketplace/purchase", payload);
     this.events.emit("cart:purchased", response);
     return response;

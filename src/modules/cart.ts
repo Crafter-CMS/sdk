@@ -13,12 +13,17 @@ export class CartModule {
    * POST /marketplace/purchase
    */
   public async purchase(data: PurchaseDto): Promise<PurchaseResponse> {
-    const payload = {
-      productIds: data.productIds,
+    const payload: Record<string, any> = {
       coupon: data.coupon || (data as any).couponCode || null,
     };
+
+    if (data.productIds !== undefined) payload.productIds = data.productIds;
+    if (data.items !== undefined) payload.items = data.items;
+    if (data.quantities !== undefined) payload.quantities = data.quantities;
+
     const response = await this.http.post<PurchaseResponse>('/marketplace/purchase', payload);
     this.events.emit('cart:purchased', response);
     return response;
   }
 }
+

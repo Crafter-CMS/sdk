@@ -283,9 +283,28 @@ export interface Product {
 
 // ===================== 4. Marketplace / Checkout Types =====================
 
+export interface PurchaseItemDto {
+  /** Product UUID. */
+  productId: string;
+  /** Quantity to purchase. */
+  quantity: number;
+}
+
 export interface PurchaseDto {
-  productIds: string[];
+  /** List of product UUIDs to purchase. */
+  productIds?: string[];
+  /** Optional coupon code to apply. */
   coupon?: string;
+  /**
+   * Per-product quantity list (alternative to `quantities`).
+   * Each entry specifies a productId and the desired quantity.
+   */
+  items?: PurchaseItemDto[];
+  /**
+   * Product quantities as a map of productId → quantity.
+   * Alternative to `items`.
+   */
+  quantities?: Record<string, number>;
   [key: string]: any;
 }
 
