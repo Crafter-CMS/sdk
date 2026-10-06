@@ -237,6 +237,13 @@ interface Product {
     discountPrice?: number;
     category: string;
     server_id: string;
+    type?: 'in_game' | 'digital' | 'downloadable';
+    serverIds?: string[];
+    deliveries?: {
+        serverId: string;
+        commands: string[];
+    }[];
+    fileUrl?: string | null;
     images: string[];
     stock: number;
     discountType?: 'percentage' | 'fixed' | null;
@@ -793,6 +800,13 @@ interface CrafterEventMap {
     };
     'discord:unlinked': void;
     'cart:purchased': PurchaseResponse;
+    'cart:checkout': any;
+    'license:verified': {
+        valid: boolean;
+        productId?: string;
+        type?: string;
+        downloadable?: boolean;
+    };
     'chest:item_used': {
         itemId: string;
         response: UseChestItemResponse;
@@ -1190,10 +1204,39 @@ declare class StoreModule {
      */
     getCategory(categoryId: string): Promise<Category>;
     /**
-     * List all products.
+     * List products. With no filter the full catalog is returned.
+     * Groups combine; several values in one group match any of them.
      * GET /products
      */
-    getProducts(): Promise<Product[]>;
+    getProducts(filter?: {
+        type?: string | string[];
+        server?: string | string[];
+        category?: string | string[];
+        tag?: string | string[];
+        q?: string;
+        priceMin?: number;
+        priceMax?: number;
+        available?: boolean;
+    }): Promise<Product[]>;
+    /**
+     * Filter groups for a storefront sidebar: price range, category, stock, type, tag and server.
+     * GET /products/filters
+     */
+    getFilters(): Promise<{
+        filters: Array<{
+            id: string;
+            label: string;
+            type: string;
+            min?: number;
+            max?: number;
+            values?: Array<{
+                id: string;
+                label: string;
+                count: number;
+            }>;
+        }>;
+    }>;
+    private joinFilter;
     /**
      * Get product details by product ID.
      * GET /products/:productId
@@ -1220,6 +1263,24 @@ declare class CartModule {
      * POST /marketplace/purchase
      */
     purchase(data: PurchaseDto): Promise<PurchaseResponse>;
+    /**
+     * Pay the cart at a provider. The charged amount is the storefront total.
+     * Balance is not credited and the top-up multiplier is not applied.
+     * POST /payment/checkout
+     */
+    checkout(data: PurchaseDto & {
+        providerId: string;
+        websiteId: string;
+        provider?: string;
+        currency?: string;
+        paymentDetails?: Record<string, any>;
+        user: {
+            name: string;
+            email: string;
+            phone?: string;
+            address?: string;
+        };
+    }): Promise<any>;
 }
 
 declare class ChestModule {
@@ -1643,6 +1704,47 @@ declare class WebsiteModule {
     getInfo(): Promise<WebsiteInfo>;
 }
 
+interface LicenseRecord {
+    id: string;
+    productId: string;
+    productName: string | null;
+    key: string;
+    type: 'in_game' | 'digital' | 'downloadable';
+    code: string | null;
+    hasDownload: boolean;
+    status: string;
+    createdAt: string;
+}
+interface LicenseVerification {
+    valid: boolean;
+    productId?: string;
+    type?: string;
+    downloadable?: boolean;
+}
+declare class LicensesModule {
+    private http;
+    private events;
+    constructor(http: HttpClient, events: EventEmitter);
+    /**
+     * Licenses owned by the signed-in user, including digital codes.
+     * GET /marketplace/licenses
+     */
+    list(): Promise<LicenseRecord[]>;
+    /**
+     * Check a license key. The response does not include a digital code or a download URL.
+     * GET /marketplace/licenses/verify
+     */
+    verify(key: string): Promise<LicenseVerification>;
+    /**
+     * Short-lived download URL for a license owned by the signed-in user.
+     * GET /marketplace/licenses/:licenseId/download
+     */
+    download(licenseId: string): Promise<{
+        url: string;
+        expiresIn: number;
+    }>;
+}
+
 /**
  * Official Lexical Format Bitmask Flags
  * @see https://lexical.dev/docs/concepts/nodes
@@ -1828,6 +1930,7 @@ declare class Crafter {
     readonly seo: SeoModule;
     readonly luckperms: LuckPermsModule;
     readonly website: WebsiteModule;
+    readonly licenses: LicensesModule;
     readonly utils: {
         lexicalToHtml: typeof lexicalToHtml;
         lexicalToText: typeof lexicalToText;
@@ -1875,4 +1978,4 @@ declare class Crafter {
     emit(event: string, payload?: any): void;
 }
 
-export { type Auth2FaRequiredResponse, type AuthEmailVerificationRequiredResponse, AuthModule, type AuthResponse, type AuthSuccessResponse, type BulkDiscountConfig, CartModule, type Category, type ChangePasswordDto, type CheckPaymentResponse, type ChestItem, ChestModule, type ChestProductSummary, type CouponResponse, CouponsModule, Crafter, type CrafterApiError, type CrafterConfig, CrafterError, type CrafterEventMap, type CrafterEventName, type CreateReportDto, type CreateTicketDto, type DisableTwoFactorDto, type DiscordStatusData, type DiscordStatusResponse, EventEmitter, type EventHandler, type ForumCategory, type ForumMessage, type ForumMessageReply, ForumModule, type ForumTopic, type GiftChestItemResponse, type HelpArticleItem, type HelpCategoryItem, type HelpFaqItem, type HelpcenterCategoryDetailResponse, HelpcenterModule, type HelpcenterOverviewResponse, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, type InGameAuthDto, type InitiatePaymentDto, type InitiatePaymentResponse, type InitiatePaymentUser, type LatestPayment, type LatestPurchase, type LatestSignup, type LegalDocuments, LegalModule, type LexicalHtmlOptions, type LightweightBalanceResponse, type LikePostResponse, type LikeTopicResponse, LuckPermsModule, type LuckPermsPermissionNode, type LuckPermsPlayerData, type MarketplaceConfig, type PageItem, PagesModule, type PaginatedPostsResponse, type PaginatedPunishmentsResponse, PaymentsModule, type PostAuthor, type PostItem, type PostQueryDto, PostsModule, type Product, type PublicPaymentProvider, type PunishmentItem, PunishmentsModule, type PurchaseDto, type PurchaseItemDto, type PurchaseResponse, RedeemCodeModule, type ReplyTicketDto, type ReportResponse, type ReportType, ReportsModule, type RequestOptions, type ResetPasswordDto, SearchModule, type SearchResultItem, type SendBalanceParams, type SendBalanceResponse, SeoModule, type SerializedCodeNode, type SerializedEditorState, type SerializedElementNode, type SerializedHeadingNode, type SerializedHorizontalRuleNode, type SerializedImageNode, type SerializedLexicalNode, type SerializedLinkNode, type SerializedListItemNode, type SerializedListNode, type SerializedQuoteNode, type SerializedRootNode, type SerializedTableCellNode, type SerializedTableNode, type SerializedTableRowNode, type SerializedTextNode, type ServerStatusItem, ServersModule, type SignInDto, type SignUpDto, type SinglePostResponse, type SiteStatistics, type SitemapUrlItem, type StaffFormApplicationResponse, type StaffFormApplicationValue, type StaffFormInput, type StaffFormItem, StaffFormsModule, StatisticsModule, StoreModule, type Ticket, type TicketCategory, type TicketCategoryDetails, type TicketMessage, type TicketMessageSender, TicketsModule, type TopCreditLoader, type TwoFactorStatusResponse, type TwoFactorValidateDto, type UpdateOwnUserDto, type UseChestItemResponse, type UseRedeemCodeResponse, type UserProfile, type UserRole, UsersModule, VoteModule, type VoteProcessResponse, type VoteProviderItem, type WallMessage, type WallMessageReply, type WebsiteInfo, WebsiteModule, type WebsitePluginModule, type WebsiteSeoConfig, Crafter as default, htmlToLexical, isCrafterError, isLexicalFormat, lexicalToHtml, lexicalToPlainText, lexicalToText, toLexical };
+export { type Auth2FaRequiredResponse, type AuthEmailVerificationRequiredResponse, AuthModule, type AuthResponse, type AuthSuccessResponse, type BulkDiscountConfig, CartModule, type Category, type ChangePasswordDto, type CheckPaymentResponse, type ChestItem, ChestModule, type ChestProductSummary, type CouponResponse, CouponsModule, Crafter, type CrafterApiError, type CrafterConfig, CrafterError, type CrafterEventMap, type CrafterEventName, type CreateReportDto, type CreateTicketDto, type DisableTwoFactorDto, type DiscordStatusData, type DiscordStatusResponse, EventEmitter, type EventHandler, type ForumCategory, type ForumMessage, type ForumMessageReply, ForumModule, type ForumTopic, type GiftChestItemResponse, type HelpArticleItem, type HelpCategoryItem, type HelpFaqItem, type HelpcenterCategoryDetailResponse, HelpcenterModule, type HelpcenterOverviewResponse, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, type InGameAuthDto, type InitiatePaymentDto, type InitiatePaymentResponse, type InitiatePaymentUser, type LatestPayment, type LatestPurchase, type LatestSignup, type LegalDocuments, LegalModule, type LexicalHtmlOptions, type LicenseRecord, type LicenseVerification, LicensesModule, type LightweightBalanceResponse, type LikePostResponse, type LikeTopicResponse, LuckPermsModule, type LuckPermsPermissionNode, type LuckPermsPlayerData, type MarketplaceConfig, type PageItem, PagesModule, type PaginatedPostsResponse, type PaginatedPunishmentsResponse, PaymentsModule, type PostAuthor, type PostItem, type PostQueryDto, PostsModule, type Product, type PublicPaymentProvider, type PunishmentItem, PunishmentsModule, type PurchaseDto, type PurchaseItemDto, type PurchaseResponse, RedeemCodeModule, type ReplyTicketDto, type ReportResponse, type ReportType, ReportsModule, type RequestOptions, type ResetPasswordDto, SearchModule, type SearchResultItem, type SendBalanceParams, type SendBalanceResponse, SeoModule, type SerializedCodeNode, type SerializedEditorState, type SerializedElementNode, type SerializedHeadingNode, type SerializedHorizontalRuleNode, type SerializedImageNode, type SerializedLexicalNode, type SerializedLinkNode, type SerializedListItemNode, type SerializedListNode, type SerializedQuoteNode, type SerializedRootNode, type SerializedTableCellNode, type SerializedTableNode, type SerializedTableRowNode, type SerializedTextNode, type ServerStatusItem, ServersModule, type SignInDto, type SignUpDto, type SinglePostResponse, type SiteStatistics, type SitemapUrlItem, type StaffFormApplicationResponse, type StaffFormApplicationValue, type StaffFormInput, type StaffFormItem, StaffFormsModule, StatisticsModule, StoreModule, type Ticket, type TicketCategory, type TicketCategoryDetails, type TicketMessage, type TicketMessageSender, TicketsModule, type TopCreditLoader, type TwoFactorStatusResponse, type TwoFactorValidateDto, type UpdateOwnUserDto, type UseChestItemResponse, type UseRedeemCodeResponse, type UserProfile, type UserRole, UsersModule, VoteModule, type VoteProcessResponse, type VoteProviderItem, type WallMessage, type WallMessageReply, type WebsiteInfo, WebsiteModule, type WebsitePluginModule, type WebsiteSeoConfig, Crafter as default, htmlToLexical, isCrafterError, isLexicalFormat, lexicalToHtml, lexicalToPlainText, lexicalToText, toLexical };

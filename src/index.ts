@@ -25,6 +25,7 @@ import { SearchModule } from './modules/search';
 import { SeoModule } from './modules/seo';
 import { LuckPermsModule } from './modules/luckperms';
 import { WebsiteModule } from './modules/website';
+import { LicensesModule } from './modules/licenses';
 import {
   lexicalToHtml,
   lexicalToText,
@@ -73,6 +74,7 @@ export class Crafter {
   public readonly seo: SeoModule;
   public readonly luckperms: LuckPermsModule;
   public readonly website: WebsiteModule;
+  public readonly licenses: LicensesModule;
 
   public readonly utils = {
     lexicalToHtml,
@@ -153,6 +155,7 @@ export class Crafter {
     this.seo = new SeoModule(this.http, this.events);
     this.luckperms = new LuckPermsModule(this.http, this.events);
     this.website = new WebsiteModule(this.http, this.events);
+    this.licenses = new LicensesModule(this.http, this.events);
   }
 
   // ===================== Event Shorthands =====================
@@ -212,4 +215,5 @@ export * from './modules/search';
 export * from './modules/seo';
 export * from './modules/luckperms';
 export * from './modules/website';
+export * from './modules/licenses';
 export * from './utils/lexical';

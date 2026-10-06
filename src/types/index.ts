@@ -271,6 +271,10 @@ export interface Product {
   discountPrice?: number;
   category: string;
   server_id: string;
+  type?: 'in_game' | 'digital' | 'downloadable';
+  serverIds?: string[];
+  deliveries?: { serverId: string; commands: string[] }[];
+  fileUrl?: string | null;
   images: string[];
   stock: number;
   discountType?: 'percentage' | 'fixed' | null;
@@ -908,6 +912,8 @@ export interface CrafterEventMap {
 
   // ================= Store & Cart =================
   'cart:purchased': PurchaseResponse;
+  'cart:checkout': any;
+  'license:verified': { valid: boolean; productId?: string; type?: string; downloadable?: boolean };
 
   // ================= Chest =================
   'chest:item_used': { itemId: string; response: UseChestItemResponse };

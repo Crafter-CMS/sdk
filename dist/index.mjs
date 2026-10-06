@@ -722,11 +722,34 @@ var StoreModule = class {
     return this.http.get(`/categories/${categoryId}`);
   }
   /**
-   * List all products.
+   * List products. With no filter the full catalog is returned.
+   * Groups combine; several values in one group match any of them.
    * GET /products
    */
-  async getProducts() {
-    return this.http.get("/products");
+  async getProducts(filter) {
+    const params = filter ? {
+      type: this.joinFilter(filter.type),
+      server: this.joinFilter(filter.server),
+      category: this.joinFilter(filter.category),
+      tag: this.joinFilter(filter.tag),
+      q: filter.q || void 0,
+      priceMin: filter.priceMin,
+      priceMax: filter.priceMax,
+      available: filter.available
+    } : void 0;
+    return this.http.get("/products", params ? { params } : void 0);
+  }
+  /**
+   * Filter groups for a storefront sidebar: price range, category, stock, type, tag and server.
+   * GET /products/filters
+   */
+  async getFilters() {
+    return this.http.get("/products/filters");
+  }
+  joinFilter(value) {
+    if (value == null || value === "") return void 0;
+    const joined = (Array.isArray(value) ? value : [value]).filter(Boolean).join(",");
+    return joined || void 0;
   }
   /**
    * Get product details by product ID.
@@ -772,6 +795,28 @@ var CartModule = class {
     if (data.quantities !== void 0) payload.quantities = data.quantities;
     const response = await this.http.post("/marketplace/purchase", payload);
     this.events.emit("cart:purchased", response);
+    return response;
+  }
+  /**
+   * Pay the cart at a provider. The charged amount is the storefront total.
+   * Balance is not credited and the top-up multiplier is not applied.
+   * POST /payment/checkout
+   */
+  async checkout(data) {
+    const payload = {
+      providerId: data.providerId,
+      websiteId: data.websiteId,
+      currency: data.currency || "TRY",
+      coupon: data.coupon || data.couponCode || void 0,
+      user: data.user
+    };
+    if (data.provider !== void 0) payload.provider = data.provider;
+    if (data.paymentDetails !== void 0) payload.paymentDetails = data.paymentDetails;
+    if (data.productIds !== void 0) payload.productIds = data.productIds;
+    if (data.items !== void 0) payload.items = data.items;
+    if (data.quantities !== void 0) payload.quantities = data.quantities;
+    const response = await this.http.post("/payment/checkout", payload);
+    this.events.emit("cart:checkout", response);
     return response;
   }
 };
@@ -2036,6 +2081,42 @@ var WebsiteModule = class {
   }
 };
 
+// src/modules/licenses.ts
+var LicensesModule = class {
+  constructor(http, events) {
+    this.http = http;
+    this.events = events;
+  }
+  http;
+  events;
+  /**
+   * Licenses owned by the signed-in user, including digital codes.
+   * GET /marketplace/licenses
+   */
+  async list() {
+    return this.http.get("/marketplace/licenses");
+  }
+  /**
+   * Check a license key. The response does not include a digital code or a download URL.
+   * GET /marketplace/licenses/verify
+   */
+  async verify(key) {
+    const response = await this.http.get("/marketplace/licenses/verify", {
+      params: { key },
+      skipAuth: true
+    });
+    this.events.emit("license:verified", response);
+    return response;
+  }
+  /**
+   * Short-lived download URL for a license owned by the signed-in user.
+   * GET /marketplace/licenses/:licenseId/download
+   */
+  async download(licenseId) {
+    return this.http.get(`/marketplace/licenses/${licenseId}/download`);
+  }
+};
+
 // src/index.ts
 var Crafter = class {
   config;
@@ -2067,6 +2148,7 @@ var Crafter = class {
   seo;
   luckperms;
   website;
+  licenses;
   utils = {
     lexicalToHtml,
     lexicalToText,
@@ -2138,6 +2220,7 @@ var Crafter = class {
     this.seo = new SeoModule(this.http, this.events);
     this.luckperms = new LuckPermsModule(this.http, this.events);
     this.website = new WebsiteModule(this.http, this.events);
+    this.licenses = new LicensesModule(this.http, this.events);
   }
   on(event, handler) {
     return this.events.on(event, handler);
@@ -2154,6 +2237,6 @@ var Crafter = class {
 };
 var index_default = Crafter;
 
-export { AuthModule, CartModule, ChestModule, CouponsModule, Crafter, CrafterError, EventEmitter, ForumModule, HelpcenterModule, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, LegalModule, LuckPermsModule, PagesModule, PaymentsModule, PostsModule, PunishmentsModule, RedeemCodeModule, ReportsModule, SearchModule, SeoModule, ServersModule, StaffFormsModule, StatisticsModule, StoreModule, TicketsModule, UsersModule, VoteModule, WebsiteModule, index_default as default, htmlToLexical, isCrafterError, isLexicalFormat, lexicalToHtml, lexicalToPlainText, lexicalToText, toLexical };
+export { AuthModule, CartModule, ChestModule, CouponsModule, Crafter, CrafterError, EventEmitter, ForumModule, HelpcenterModule, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, LegalModule, LicensesModule, LuckPermsModule, PagesModule, PaymentsModule, PostsModule, PunishmentsModule, RedeemCodeModule, ReportsModule, SearchModule, SeoModule, ServersModule, StaffFormsModule, StatisticsModule, StoreModule, TicketsModule, UsersModule, VoteModule, WebsiteModule, index_default as default, htmlToLexical, isCrafterError, isLexicalFormat, lexicalToHtml, lexicalToPlainText, lexicalToText, toLexical };
 //# sourceMappingURL=index.mjs.map
 //# sourceMappingURL=index.mjs.map
