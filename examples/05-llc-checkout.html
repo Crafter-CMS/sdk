@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LLC Checkout (Stripe Payment Element)</title>
+  <!--
+    Satıcı Crafter Technologies LLC iken CrafterPayments sepet ödemesi (SDK v1.2.0).
+    - SDK Stripe.js'i içermez; bu sayfa Stripe.js'i yalnızca LLC yanıtı gelince js.stripe.com'dan yükler.
+    - Test için Stripe test modu (pk_test_...) ve test kartı: 4242 4242 4242 4242, ileri bir tarih, herhangi bir CVC.
+      3DS denemesi: 4000 0027 6000 3184. Gerçek kart kullanmayın.
+    - Storefront modunda çalışır (Liquid tema, /api/storefront proxy'si). Oturum açık olmalıdır.
+  -->
+  <script src="../dist/crafter.min.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #fafafa; max-width: 520px; margin: 40px auto; padding: 0 16px; }
+    .card { background: #141b24; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+    label { display: block; font-size: 13px; color: #a1a1a1; margin: 10px 0 4px; }
+    input, select, button { width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.15); background: #0a0a0a; color: #fafafa; }
+    button { background: #2563eb; border: 0; font-weight: 600; margin-top: 16px; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    .row { display: flex; justify-content: space-between; font-size: 14px; padding: 4px 0; }
+    .total { font-weight: 700; border-top: 1px solid rgba(255,255,255,.1); margin-top: 6px; padding-top: 8px; }
+    .error { color: #ff6467; font-size: 14px; min-height: 20px; margin-top: 10px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Ödeme</h1>
+
+  <form id="buyer-form" class="card">
+    <label for="name">Ad soyad</label>
+    <input id="name" required value="Test Buyer" />
+    <label for="email">E-posta</label>
+    <input id="email" type="email" required value="buyer@example.com" />
+    <label for="country">Ülke</label>
+    <select id="country">
+      <option value="US">United States</option>
+      <option value="DE">Germany</option>
+      <option value="GB">United Kingdom</option>
+      <option value="TR">Türkiye</option>
+    </select>
+    <div id="postal-wrap">
+      <label for="postal">Posta kodu (ABD / Kanada)</label>
+      <input id="postal" value="10001" />
+    </div>
+    <button id="start" type="submit">Ödemeye geç</button>
+    <div id="form-error" class="error"></div>
+  </form>
+
+  <section id="pay" class="card hidden">
+    <div id="summary"></div>
+    <div id="payment-element" style="margin-top:16px"></div>
+    <button id="pay-button" type="button">Öde</button>
+    <div id="pay-error" class="error"></div>
+  </section>
+
+  <section id="result" class="card hidden" role="status" aria-live="polite"></section>
+
+  <script>
+    // --- Yapılandırma (örnek değerler) ---
+    const WEBSITE_ID = 'your-website-id';
+    const CART = [{ productId: 'demo-product-id', quantity: 1 }];
+    const CURRENCY = 'USD'; // mağaza para birimi
+
+    const crafter = new Crafter({
+      // Backend publishable key döndürmüyorsa buradan verilir (gizli değildir)
+      stripePublishableKey: 'pk_test_REPLACE_ME',
+    });
+
+    const $ = (id) => document.getElementById(id);
+    const fmt = (n, c) => new Intl.NumberFormat(undefined, { style: 'currency', currency: c }).format(n);
+    const RESULT_TEXT = {
+      success: 'Ödeme alındı, siparişin teslim edildi.',
+      processing: 'Ödeme alındı, teslimat sürüyor.',
+      pending: 'Ödeme onayı birkaç dakika sürebilir. Siparişlerim sayfasından takip edebilirsin.',
+      refunded: 'Ürün tükendiği için teslim edilemedi; ödemen iade edildi.',
+      needs_review: 'Ödeme alındı ancak teslimat incelemede. Destek ekibimiz seninle iletişime geçecek.',
+      failed: 'Ödeme alınamadı.',
+    };
+
+    // Stripe.js yalnızca LLC yanıtında, bir kez yüklenir
+    let stripeJs;
+    function loadStripeJs() {
+      if (!stripeJs) {
+        stripeJs = window.Stripe
+          ? Promise.resolve(window.Stripe)
+          : new Promise((resolve, reject) => {
+              const s = document.createElement('script');
+              s.src = 'https://js.stripe.com/v3/';
+              s.onload = () => resolve(window.Stripe);
+              s.onerror = () => reject(new Error('Stripe.js yüklenemedi'));
+              document.head.appendChild(s);
+            });
+      }
+      return stripeJs;
+    }
+
+    function renderSummary(session) {
+      const tax = session.tax;
+      const rows = [];
+      if (tax) {
+        rows.push(`<div class="row"><span>Ara toplam</span><span>${fmt(tax.subtotal, session.currency)}</span></div>`);
+        for (const line of tax.lines) {
+          const region = [line.country, line.state].filter(Boolean).join('-');
+          rows.push(`<div class="row"><span>${(line.taxType || 'tax').toUpperCase()} ${region} (%${line.rate})</span><span>${fmt(line.amount, session.currency)}</span></div>`);
+        }
+      }
+      rows.push(`<div class="row total"><span>Toplam</span><span>${fmt(session.amount, session.currency)}</span></div>`);
+      $('summary').innerHTML = rows.join('');
+    }
+
+    function showResult(outcome) {
+      $('pay').classList.add('hidden');
+      $('result').classList.remove('hidden');
+      $('result').textContent = RESULT_TEXT[outcome] || RESULT_TEXT.pending;
+    }
+
+    async function mountPaymentElement(session) {
+      if (!session.publishableKey) throw new Error('Stripe publishable key tanımlı değil');
+      const Stripe = await loadStripeJs();
+      const stripe = Stripe(session.publishableKey);
+      const elements = stripe.elements({ clientSecret: session.clientSecret, appearance: { theme: 'night' } });
+      elements.create('payment', { layout: 'tabs' }).mount('#payment-element');
+
+      $('pay-button').onclick = async () => {
+        $('pay-button').disabled = true;
+        $('pay-error').textContent = '';
+        try {
+          const returnUrl = new URL(location.href);
+          returnUrl.searchParams.set('stripe_payment_id', session.paymentId);
+          const { error } = await stripe.confirmPayment({
+            elements,
+            redirect: 'if_required',
+            confirmParams: { return_url: returnUrl.toString() },
+          });
+          if (error) {
+            // Eksik alanları Payment Element kendi gösterir; kart reddi vb. burada. Aynı formla tekrar denenebilir.
+            if (error.type !== 'validation_error') $('pay-error').textContent = error.message;
+            return;
+          }
+          $('pay-button').textContent = 'Doğrulanıyor…';
+          const result = await crafter.payments.waitForResult(session.paymentId);
+          showResult(result.outcome);
+        } finally {
+          $('pay-button').disabled = false;
+        }
+      };
+    }
+
+    // 3DS tam sayfa yönlendirmesinden dönüş
+    const returnedId = new URLSearchParams(location.search).get('stripe_payment_id');
+    if (returnedId) {
+      $('buyer-form').classList.add('hidden');
+      crafter.payments.waitForResult(returnedId).then((r) => showResult(r.outcome));
+    }
+
+    $('country').onchange = () => {
+      $('postal-wrap').classList.toggle('hidden', !['US', 'CA'].includes($('country').value));
+    };
+
+    $('buyer-form').onsubmit = async (event) => {
+      event.preventDefault();
+      $('form-error').textContent = '';
+      $('start').disabled = true;
+      try {
+        const providers = await crafter.payments.getPublicProviders();
+        const provider = providers.find((p) => String(p.provider).toLowerCase() === 'crafterpayments');
+        if (!provider) throw new Error('CrafterPayments bu mağazada aktif değil');
+
+        const country = $('country');
+        const res = await crafter.cart.checkout(
+          {
+            websiteId: WEBSITE_ID,
+            providerId: provider.id,
+            provider: 'CrafterPayments',
+            currency: CURRENCY,
+            items: CART,
+            user: { name: $('name').value.trim(), email: $('email').value.trim(), address: country.selectedOptions[0].text },
+            billingCountry: country.value,
+            ...(['US', 'CA'].includes(country.value) ? { billingPostalCode: $('postal').value.trim() } : {}),
+          },
+          { legalTerms: { version: 'example-terms-v1' } }
+        );
+
+        if (res.delivered) return showResult('success'); // bakiyeyle ödendi
+        if (!res.stripe) throw new Error('Beklenmeyen yanıt: bu örnek yalnızca satıcı LLC akışını gösterir');
+
+        renderSummary(res.stripe);
+        $('buyer-form').classList.add('hidden');
+        $('pay').classList.remove('hidden');
+        await mountPaymentElement(res.stripe);
+      } catch (err) {
+        const { isOutOfStockError, isPaymentProviderError } = window.CrafterSDK;
+        if (isOutOfStockError(err)) {
+          $('form-error').textContent = `Tükenen ürünler: ${err.productIds.join(', ')}`;
+        } else if (isPaymentProviderError(err)) {
+          $('form-error').textContent = err.message + (err.retryable ? ' (birazdan tekrar deneyin)' : '');
+        } else {
+          $('form-error').textContent = err.message || 'Ödeme başlatılamadı';
+        }
+      } finally {
+        $('start').disabled = false;
+      }
+    };
+  </script>
+</body>
+</html>

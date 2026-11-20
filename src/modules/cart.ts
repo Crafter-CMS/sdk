@@ -1,11 +1,13 @@
 import { HttpClient } from '../core/http';
 import { EventEmitter } from '../core/events';
-import { PurchaseDto, PurchaseResponse } from '../types';
+import { CheckoutPaymentResponse, PurchaseDto, PurchaseResponse } from '../types';
+import { LegalTermsConsent, legalTermsHeaders, normalizePaymentResponse, PaymentsModuleOptions } from './payments';
 
 export class CartModule {
   constructor(
     private http: HttpClient,
-    private events: EventEmitter
+    private events: EventEmitter,
+    private options: PaymentsModuleOptions = {}
   ) {}
 
   /**
@@ -29,6 +31,8 @@ export class CartModule {
   /**
    * Pay the cart at a provider. The charged amount is the storefront total.
    * Balance is not credited and the top-up multiplier is not applied.
+   * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi kırılımı) bulunur.
+   * Stok yetersizse `CrafterOutOfStockError` (HTTP 409, `productIds`) fırlatılır.
    * POST /payment/checkout
    */
   public async checkout(data: PurchaseDto & {
@@ -38,7 +42,11 @@ export class CartModule {
     currency?: string;
     paymentDetails?: Record<string, any>;
     user: { name: string; email: string; phone?: string; address?: string };
-  }): Promise<any> {
+    /** Alıcının ülkesi (ISO 3166-1 alpha-2); satıcı LLC iken Stripe Tax vergi konumu */
+    billingCountry?: string;
+    /** ABD / Kanada için posta kodu (Stripe Tax) */
+    billingPostalCode?: string;
+  }, options: { legalTerms?: LegalTermsConsent } = {}): Promise<CheckoutPaymentResponse> {
     const payload: Record<string, any> = {
       providerId: data.providerId,
       websiteId: data.websiteId,
@@ -51,8 +59,13 @@ export class CartModule {
     if (data.productIds !== undefined) payload.productIds = data.productIds;
     if (data.items !== undefined) payload.items = data.items;
     if (data.quantities !== undefined) payload.quantities = data.quantities;
+    if (data.billingCountry !== undefined) payload.billingCountry = data.billingCountry;
+    if (data.billingPostalCode !== undefined) payload.billingPostalCode = data.billingPostalCode;
 
-    const response = await this.http.post<any>('/payment/checkout', payload);
+    const raw = await this.http.post<CheckoutPaymentResponse>('/payment/checkout', payload, {
+      headers: legalTermsHeaders(options.legalTerms),
+    });
+    const response = normalizePaymentResponse(raw, this.options.stripePublishableKey);
     this.events.emit('cart:checkout', response);
     return response;
   }
