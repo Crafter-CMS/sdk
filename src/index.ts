@@ -127,7 +127,7 @@ export class Crafter {
     this.users = new UsersModule(this.http, this.events);
     this.store = new StoreModule(this.http, this.events);
     
-    const cartModule = new CartModule(this.http, this.events);
+    const cartModule = new CartModule(this.http, this.events, this.config);
     this.cart = cartModule;
     this.marketplace = cartModule;
 
@@ -142,7 +142,7 @@ export class Crafter {
     this.redeemCodes = redeemModule;
 
     this.servers = new ServersModule(this.http, this.events);
-    this.payments = new PaymentsModule(this.http, this.events);
+    this.payments = new PaymentsModule(this.http, this.events, this.config);
     this.statistics = new StatisticsModule(this.http, this.events);
     this.punishments = new PunishmentsModule(this.http, this.events);
     this.vote = new VoteModule(this.http, this.events);

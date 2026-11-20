@@ -16,7 +16,7 @@ Kütüphane; tüm API uç noktalarını, DTO doğrulamalarını, token yaşam d�
 | **04** | [**Sandık Modülü (`chest`)**](./04-chest.md) | Oyuncu Sandığı, Eşya Kullanma, Arkadaşa Hediye Gönderme |
 | **05** | [**Destek Talepleri (`tickets`)**](./05-tickets.md) | Talep Listeleme, Talep Oluşturma, Yanıtlama, Kapatma ve Yeniden Açma |
 | **06** | [**Duyurular & Sayfalar (`posts` & `pages`)**](./06-posts-and-pages.md) | Duyuru Listeleme, Slug/ID Detayı, Beğenme, Kullanıcı Beğenileri, Sabit Sayfalar |
-| **07** | [**Ödeme İşlemleri (`payments`)**](./07-payments.md) | Aktif Ödeme Sağlayıcıları (PayTR, Shopier vb.), Ödeme Başlatma (Iframe/Redirect), Durum Sorgulama |
+| **07** | [**Ödeme İşlemleri (`payments`)**](./07-payments.md) | Aktif Ödeme Sağlayıcıları (PayTR, Shopier vb.), Ödeme Başlatma (Iframe/Redirect), Durum Sorgulama, LLC: Stripe Payment Element, vergi kırılımı, bakiye koşulları, teslimat durumu, tipli ödeme hataları |
 | **08** | [**Kuponlar & Hediye Kodları (`coupons` & `redeemCode`)**](./08-coupons-and-redeem.md) | Sepet Kuponu Kontrolü, Promosyon ve Hediye Kartı Bozdurma |
 | **09** | [**İstatistikler & Cezalar (`statistics` & `punishments`)**](./09-statistics-and-punishments.md) | Son Yüklemeler, Satın Alımlar, Lider Tablosu (Leaderboard), Ceza Listesi ve Arama |
 | **10** | [**Sunucular & Oy Verme (`servers` & `vote`)**](./10-servers-and-vote.md) | Canlı Sunucu Durumu (Ping, Online Oyuncu), Oy Siteleri Listesi ve Oy Kullanma |

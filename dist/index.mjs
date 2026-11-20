@@ -2,6 +2,8 @@
 var CrafterError = class _CrafterError extends Error {
   statusCode;
   error;
+  /** Backend hata kodu (ErrorType), ör. 'out_of_stock', 'balance_top_up_limit_exceeded' */
+  type;
   details;
   isCrafterError = true;
   constructor(payload) {
@@ -10,24 +12,109 @@ var CrafterError = class _CrafterError extends Error {
     this.name = "CrafterError";
     this.statusCode = payload.statusCode ?? 500;
     this.error = payload.error;
+    this.type = payload.type;
     this.details = payload.details;
-    Object.setPrototypeOf(this, _CrafterError.prototype);
+    Object.setPrototypeOf(this, new.target.prototype);
   }
   static fromResponse(statusCode, data) {
     if (typeof data === "string") {
       return new _CrafterError({ statusCode, message: data });
     }
     const apiError = data;
-    return new _CrafterError({
+    const payload = {
       statusCode: apiError?.statusCode || statusCode,
       message: apiError?.message || `HTTP Request failed with status ${statusCode}`,
       error: apiError?.error,
+      type: typeof apiError?.type === "string" ? apiError.type : void 0,
       details: apiError?.details || data
-    });
+    };
+    switch (payload.type) {
+      case PaymentErrorType.OUT_OF_STOCK:
+        return new CrafterOutOfStockError(payload);
+      case PaymentErrorType.BALANCE_TOP_UP_UNAVAILABLE:
+      case PaymentErrorType.BALANCE_TOP_UP_LIMIT_EXCEEDED:
+      case PaymentErrorType.BALANCE_TOP_UP_TOTAL_LIMIT_EXCEEDED:
+        return new CrafterBalanceTopUpError(payload);
+      default:
+        if (payload.type && PAYMENT_PROVIDER_ERROR_TYPES.includes(payload.type)) {
+          return new CrafterPaymentProviderError(payload);
+        }
+        return new _CrafterError(payload);
+    }
+  }
+};
+var PaymentErrorType = {
+  OUT_OF_STOCK: "out_of_stock",
+  BALANCE_TOP_UP_UNAVAILABLE: "balance_top_up_unavailable",
+  BALANCE_TOP_UP_LIMIT_EXCEEDED: "balance_top_up_limit_exceeded",
+  BALANCE_TOP_UP_TOTAL_LIMIT_EXCEEDED: "balance_top_up_total_limit_exceeded",
+  SELLER_ENTITY_NOT_READY: "seller_entity_not_ready",
+  TAX_CALCULATION_FAILED: "tax_calculation_failed",
+  TAX_LOCATION_INVALID: "tax_location_invalid",
+  PAYMENT_PROVIDER_NOT_FOUND: "payment_provider_not_found",
+  PAYMENT_PROVIDER_UNSUPPORTED: "payment_provider_unsupported",
+  PAYMENT_CONFIG_ERROR: "payment_config_error",
+  PAYMENT_INITIALIZATION_FAILED: "payment_initialization_failed",
+  PAYMENT_FAILED: "payment_failed"
+};
+var PAYMENT_PROVIDER_ERROR_TYPES = [
+  PaymentErrorType.SELLER_ENTITY_NOT_READY,
+  PaymentErrorType.TAX_CALCULATION_FAILED,
+  PaymentErrorType.TAX_LOCATION_INVALID,
+  PaymentErrorType.PAYMENT_PROVIDER_NOT_FOUND,
+  PaymentErrorType.PAYMENT_PROVIDER_UNSUPPORTED,
+  PaymentErrorType.PAYMENT_CONFIG_ERROR,
+  PaymentErrorType.PAYMENT_INITIALIZATION_FAILED,
+  PaymentErrorType.PAYMENT_FAILED
+];
+var CrafterOutOfStockError = class extends CrafterError {
+  /** Tükenen ürünlerin kimlikleri (`details.productIds`); backend göndermediyse boş */
+  productIds;
+  constructor(payload) {
+    super({ ...payload, type: payload.type ?? PaymentErrorType.OUT_OF_STOCK });
+    this.name = "CrafterOutOfStockError";
+    const ids = payload.details?.productIds;
+    this.productIds = Array.isArray(ids) ? ids.map(String) : [];
+  }
+};
+var CrafterBalanceTopUpError = class extends CrafterError {
+  reason;
+  /** Limit hatalarında backend'in döndürdüğü limitler; `unavailable` için null */
+  limits;
+  constructor(payload) {
+    super(payload);
+    this.name = "CrafterBalanceTopUpError";
+    this.reason = payload.type === PaymentErrorType.BALANCE_TOP_UP_LIMIT_EXCEEDED ? "single_limit" : payload.type === PaymentErrorType.BALANCE_TOP_UP_TOTAL_LIMIT_EXCEEDED ? "total_limit" : "unavailable";
+    const d = payload.details;
+    this.limits = this.reason !== "unavailable" && d && typeof d === "object" && ("maxSingleUsd" in d || "remainingAmount" in d) ? {
+      currency: d.currency,
+      maxSingleUsd: d.maxSingleUsd,
+      maxPaidUsd: d.maxPaidUsd,
+      maxSingleAmount: d.maxSingleAmount ?? null,
+      remainingAmount: d.remainingAmount ?? null
+    } : null;
+  }
+};
+var CrafterPaymentProviderError = class extends CrafterError {
+  /** Kullanıcı aynı bilgilerle biraz sonra tekrar deneyebilir mi */
+  retryable;
+  constructor(payload) {
+    super(payload);
+    this.name = "CrafterPaymentProviderError";
+    this.retryable = payload.type === PaymentErrorType.SELLER_ENTITY_NOT_READY || payload.type === PaymentErrorType.TAX_CALCULATION_FAILED || payload.type === PaymentErrorType.PAYMENT_INITIALIZATION_FAILED;
   }
 };
 function isCrafterError(err) {
   return err instanceof CrafterError || typeof err === "object" && err !== null && err.isCrafterError === true;
+}
+function isOutOfStockError(err) {
+  return err instanceof CrafterOutOfStockError;
+}
+function isBalanceTopUpError(err) {
+  return err instanceof CrafterBalanceTopUpError;
+}
+function isPaymentProviderError(err) {
+  return err instanceof CrafterPaymentProviderError;
 }
 
 // src/core/http.ts
@@ -774,14 +861,226 @@ var StoreModule = class {
   }
 };
 
-// src/modules/cart.ts
-var CartModule = class {
-  constructor(http, events) {
+// src/modules/payments.ts
+function toNumber(value, fallback = 0) {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+function round2(value) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+function parseTaxBreakdown(raw) {
+  if (!raw || typeof raw.subtotal !== "number") return null;
+  const subtotal = raw.subtotal;
+  const taxAmount = toNumber(raw.taxAmount);
+  const lines = Array.isArray(raw.taxes) ? raw.taxes.map((line) => ({
+    country: line?.country ?? null,
+    state: line?.state ?? null,
+    taxType: line?.taxType ?? null,
+    rate: toNumber(line?.rate),
+    amount: toNumber(line?.amount)
+  })) : [];
+  const amount = raw.amount !== void 0 ? toNumber(raw.amount, NaN) : NaN;
+  return {
+    subtotal,
+    taxAmount,
+    total: Number.isFinite(amount) ? amount : round2(subtotal + taxAmount),
+    currency: String(raw.currency || ""),
+    lines
+  };
+}
+function normalizePaymentResponse(raw, fallbackPublishableKey) {
+  if (!raw || typeof raw !== "object") return raw;
+  const paymentId = raw.paymentId ?? raw.payment_id;
+  const tax = parseTaxBreakdown(raw);
+  const result = { ...raw, tax };
+  if (paymentId !== void 0) result.paymentId = paymentId;
+  if (raw.type === "stripe" && typeof raw.clientSecret === "string" && raw.clientSecret) {
+    const session = {
+      paymentId: String(paymentId ?? ""),
+      clientSecret: raw.clientSecret,
+      publishableKey: raw.publishableKey || raw.stripePublishableKey || fallbackPublishableKey || null,
+      amount: toNumber(raw.amount),
+      currency: String(raw.currency || ""),
+      tax
+    };
+    if (raw.merchant_oid) session.merchantOid = String(raw.merchant_oid);
+    result.stripe = session;
+  }
+  return result;
+}
+function legalTermsHeaders(consent) {
+  if (!consent?.version) return void 0;
+  const headers = { "x-legal-terms-version": consent.version };
+  if (consent.region) headers["x-legal-terms-region"] = consent.region;
+  return headers;
+}
+var DELIVERY_STATES = ["pending", "delivered", "failed", "refunded"];
+var DELIVERY_STATUSES = ["PENDING", "DELIVERED", "NEEDS_REVIEW", "REFUNDED"];
+function parsePaymentStatus(paymentId, raw) {
+  const body = raw && typeof raw === "object" && raw.data && typeof raw.data === "object" && !raw.status ? raw.data : raw || {};
+  const status = String(body.status || "PENDING").toUpperCase();
+  const rawDelivery = typeof body.delivery === "string" ? body.delivery.toLowerCase() : null;
+  const delivery = DELIVERY_STATES.includes(rawDelivery) ? rawDelivery : null;
+  const explicit = typeof body.deliveryStatus === "string" ? body.deliveryStatus.toUpperCase() : null;
+  let deliveryStatus = explicit && DELIVERY_STATUSES.includes(explicit) ? explicit : explicit === "FAILED" ? "NEEDS_REVIEW" : null;
+  if (!deliveryStatus && delivery) {
+    deliveryStatus = delivery === "pending" ? "PENDING" : delivery === "delivered" ? "DELIVERED" : delivery === "refunded" ? "REFUNDED" : "NEEDS_REVIEW";
+  }
+  let outcome;
+  if (status === "REFUNDED" || deliveryStatus === "REFUNDED") outcome = "refunded";
+  else if (status === "COMPLETED" || status === "SUCCESS") {
+    outcome = deliveryStatus === "NEEDS_REVIEW" ? "needs_review" : deliveryStatus === "PENDING" ? "processing" : "success";
+  } else if (status === "PENDING") outcome = "pending";
+  else outcome = "failed";
+  return {
+    paymentId,
+    status,
+    delivery,
+    deliveryStatus,
+    outcome,
+    final: outcome !== "pending" && outcome !== "processing"
+  };
+}
+function topUpMaxAmount(policy, providerMax) {
+  const limits = [providerMax || 1e6];
+  if (policy?.closedLoop) {
+    if (typeof policy.maxSingleAmount === "number") limits.push(policy.maxSingleAmount);
+    if (typeof policy.remainingAmount === "number") limits.push(policy.remainingAmount);
+  }
+  return Math.max(0, Math.min(...limits));
+}
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason ?? new Error("Aborted"));
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error("Aborted"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+var PaymentsModule = class {
+  constructor(http, events, options = {}) {
     this.http = http;
     this.events = events;
+    this.options = options;
   }
   http;
   events;
+  options;
+  /**
+   * Get public active payment providers and bonus multipliers.
+   * GET /config/payment/public
+   */
+  async getPublicProviders() {
+    return this.http.get("/config/payment/public");
+  }
+  /**
+   * Initiate a payment session (PayTR, Shopier, KuveytTürk, CrafterPayments etc.).
+   * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi) bulunur.
+   * POST /payment/initiate
+   */
+  async initiate(data, options = {}) {
+    const payload = {
+      ...data,
+      providerId: data.providerId || data.provider
+    };
+    const raw = await this.http.post("/payment/initiate", payload, {
+      headers: legalTermsHeaders(options.legalTerms)
+    });
+    const response = normalizePaymentResponse(raw, this.options.stripePublishableKey);
+    this.events.emit("payment:initiated", response);
+    return response;
+  }
+  /**
+   * Check payment status by payment ID.
+   * POST /payment/check
+   */
+  async check(paymentId) {
+    const response = await this.http.post("/payment/check", { paymentId });
+    this.events.emit("payment:checked", response);
+    return response;
+  }
+  /**
+   * Ödeme ve teslimat durumu (oturum gerektirmez). Stripe ödemesinde webhook gecikirse backend ödemeyi Stripe'tan okur.
+   * GET /payment/status/:paymentId
+   */
+  async getStatus(paymentId) {
+    const raw = await this.http.get(`/payment/status/${encodeURIComponent(paymentId)}`, {
+      skipAuth: true
+    });
+    const result = parsePaymentStatus(paymentId, raw);
+    this.events.emit("payment:status", result);
+    return result;
+  }
+  /**
+   * Ödeme sonucu kesinleşene kadar `getStatus` ile yoklar (Stripe `confirmPayment` sonrası).
+   * Ödeme alındı ama teslimat sürüyorsa yoklama devam eder. Süre dolarsa son görülen durum döner.
+   * Ağ hataları yutulur, yoklama sürer.
+   */
+  async waitForResult(paymentId, options = {}) {
+    const { attempts = 20, intervalMs = 1500, signal } = options;
+    let last = parsePaymentStatus(paymentId, { status: "PENDING" });
+    for (let i = 0; i < attempts; i++) {
+      if (signal?.aborted) break;
+      try {
+        last = await this.getStatus(paymentId);
+        if (last.final) return last;
+      } catch {
+      }
+      if (i < attempts - 1) {
+        try {
+          await sleep(intervalMs, signal);
+        } catch {
+          break;
+        }
+      }
+    }
+    return last;
+  }
+  /**
+   * Bakiye yükleme koşulları: açık mı, limitler (USD ve mağaza para birimi), ödenmiş / bonus bakiye
+   * ve koşul metninin gösterilip gösterilmeyeceği (`showTerms`). Oturum gerektirir.
+   * GET /payment/balance-top-up/policy?websiteId=
+   */
+  async getTopUpPolicy(websiteId) {
+    const id = websiteId || this.options.websiteId;
+    const raw = await this.http.get("/payment/balance-top-up/policy", {
+      params: id ? { websiteId: id } : void 0
+    });
+    const data = raw && typeof raw === "object" && raw.data && typeof raw.data === "object" ? raw.data : raw || {};
+    const closedLoop = data.closedLoop === true;
+    return {
+      enabled: data.enabled === true,
+      closedLoop,
+      showTerms: closedLoop,
+      currency: String(data.currency || ""),
+      maxSingleUsd: toNumber(data.maxSingleUsd),
+      maxPaidUsd: toNumber(data.maxPaidUsd),
+      maxSingleAmount: typeof data.maxSingleAmount === "number" ? data.maxSingleAmount : null,
+      remainingAmount: typeof data.remainingAmount === "number" ? data.remainingAmount : null,
+      balance: toNumber(data.balance),
+      paidBalance: toNumber(data.paidBalance),
+      bonusBalance: toNumber(data.bonusBalance)
+    };
+  }
+};
+
+// src/modules/cart.ts
+var CartModule = class {
+  constructor(http, events, options = {}) {
+    this.http = http;
+    this.events = events;
+    this.options = options;
+  }
+  http;
+  events;
+  options;
   /**
    * Complete purchase using user balance.
    * POST /marketplace/purchase
@@ -800,9 +1099,11 @@ var CartModule = class {
   /**
    * Pay the cart at a provider. The charged amount is the storefront total.
    * Balance is not credited and the top-up multiplier is not applied.
+   * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi kırılımı) bulunur.
+   * Stok yetersizse `CrafterOutOfStockError` (HTTP 409, `productIds`) fırlatılır.
    * POST /payment/checkout
    */
-  async checkout(data) {
+  async checkout(data, options = {}) {
     const payload = {
       providerId: data.providerId,
       websiteId: data.websiteId,
@@ -815,7 +1116,12 @@ var CartModule = class {
     if (data.productIds !== void 0) payload.productIds = data.productIds;
     if (data.items !== void 0) payload.items = data.items;
     if (data.quantities !== void 0) payload.quantities = data.quantities;
-    const response = await this.http.post("/payment/checkout", payload);
+    if (data.billingCountry !== void 0) payload.billingCountry = data.billingCountry;
+    if (data.billingPostalCode !== void 0) payload.billingPostalCode = data.billingPostalCode;
+    const raw = await this.http.post("/payment/checkout", payload, {
+      headers: legalTermsHeaders(options.legalTerms)
+    });
+    const response = normalizePaymentResponse(raw, this.options.stripePublishableKey);
     this.events.emit("cart:checkout", response);
     return response;
   }
@@ -1674,45 +1980,6 @@ var ServersModule = class {
   }
 };
 
-// src/modules/payments.ts
-var PaymentsModule = class {
-  constructor(http, events) {
-    this.http = http;
-    this.events = events;
-  }
-  http;
-  events;
-  /**
-   * Get public active payment providers and bonus multipliers.
-   * GET /config/payment/public
-   */
-  async getPublicProviders() {
-    return this.http.get("/config/payment/public");
-  }
-  /**
-   * Initiate a payment session (PayTR, Shopier, CrafterPayments etc.).
-   * POST /payment/initiate
-   */
-  async initiate(data) {
-    const payload = {
-      ...data,
-      providerId: data.providerId || data.provider
-    };
-    const response = await this.http.post("/payment/initiate", payload);
-    this.events.emit("payment:initiated", response);
-    return response;
-  }
-  /**
-   * Check payment status by payment ID.
-   * POST /payment/check
-   */
-  async check(paymentId) {
-    const response = await this.http.post("/payment/check", { paymentId });
-    this.events.emit("payment:checked", response);
-    return response;
-  }
-};
-
 // src/modules/statistics.ts
 var StatisticsModule = class {
   constructor(http, events) {
@@ -2195,7 +2462,7 @@ var Crafter = class {
     this.auth = new AuthModule(this.http, this.events);
     this.users = new UsersModule(this.http, this.events);
     this.store = new StoreModule(this.http, this.events);
-    const cartModule = new CartModule(this.http, this.events);
+    const cartModule = new CartModule(this.http, this.events, this.config);
     this.cart = cartModule;
     this.marketplace = cartModule;
     this.chest = new ChestModule(this.http, this.events);
@@ -2207,7 +2474,7 @@ var Crafter = class {
     this.redeemCode = redeemModule;
     this.redeemCodes = redeemModule;
     this.servers = new ServersModule(this.http, this.events);
-    this.payments = new PaymentsModule(this.http, this.events);
+    this.payments = new PaymentsModule(this.http, this.events, this.config);
     this.statistics = new StatisticsModule(this.http, this.events);
     this.punishments = new PunishmentsModule(this.http, this.events);
     this.vote = new VoteModule(this.http, this.events);
@@ -2237,6 +2504,6 @@ var Crafter = class {
 };
 var index_default = Crafter;
 
-export { AuthModule, CartModule, ChestModule, CouponsModule, Crafter, CrafterError, EventEmitter, ForumModule, HelpcenterModule, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, LegalModule, LicensesModule, LuckPermsModule, PagesModule, PaymentsModule, PostsModule, PunishmentsModule, RedeemCodeModule, ReportsModule, SearchModule, SeoModule, ServersModule, StaffFormsModule, StatisticsModule, StoreModule, TicketsModule, UsersModule, VoteModule, WebsiteModule, index_default as default, htmlToLexical, isCrafterError, isLexicalFormat, lexicalToHtml, lexicalToPlainText, lexicalToText, toLexical };
+export { AuthModule, CartModule, ChestModule, CouponsModule, Crafter, CrafterBalanceTopUpError, CrafterError, CrafterOutOfStockError, CrafterPaymentProviderError, EventEmitter, ForumModule, HelpcenterModule, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, LegalModule, LicensesModule, LuckPermsModule, PagesModule, PaymentErrorType, PaymentsModule, PostsModule, PunishmentsModule, RedeemCodeModule, ReportsModule, SearchModule, SeoModule, ServersModule, StaffFormsModule, StatisticsModule, StoreModule, TicketsModule, UsersModule, VoteModule, WebsiteModule, index_default as default, htmlToLexical, isBalanceTopUpError, isCrafterError, isLexicalFormat, isOutOfStockError, isPaymentProviderError, legalTermsHeaders, lexicalToHtml, lexicalToPlainText, lexicalToText, normalizePaymentResponse, parsePaymentStatus, parseTaxBreakdown, toLexical, topUpMaxAmount };
 //# sourceMappingURL=index.mjs.map
 //# sourceMappingURL=index.mjs.map
