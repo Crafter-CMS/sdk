@@ -61,18 +61,37 @@ SDK'nın pratik entegrasyonlarını test etmek için hazır senaryolar:
 
 ## 📦 Kurulum & Kullanım
 
-### 1. Liquid Temalarda (Storefront Proxy Modu)
+### 1. Liquid Temalarda (v2: SDK zorunlu, otomatik yüklenir)
 
-`layout/theme.liquid` dosyanızda `<head>` veya sayfa sonuna ekleyin:
+Tema v2 sayfalarında storefront SDK'yı `{{ content_for_header }}` ile **kendisi ekler** (sürümlü adres, `defer`) ve
+`window.__CRAFTER_CONTEXT__` (mağaza, dil, para birimi, kur) ile başlatır. Tema `<script src>` ya da `new Crafter()`
+yazmaz; `window.Crafter` hazır örnektir ve `document`'a `crafter:ready` yayılır. Temalar sepet, para, dil ve checkout
+kodunu kendisi yazmaz (`crafter theme check` bunu denetler):
+
+```js
+// Sepet (bugün localStorage 'cart'; hibrit sepet #434 gelince API aynı kalır)
+await Crafter.cart.add({ id, name, price, image }, 1);   // update(id, qty), remove(id), get(), clear()
+document.addEventListener('crafter:cart:updated', (e) => (badge.textContent = e.detail.itemCount));
+
+// Para: mağaza tutarı → müşterinin para birimi, sayfanın dilinde (Liquid `money` filtresiyle aynı)
+Crafter.money.format(cart.subtotal);           // '€18,40'
+Crafter.money.format(balance, { convert: false });
+
+// Dil / para birimi: POST /localization, sayfa seçilen dildeki adrese gider
+await Crafter.localization.set({ currency: 'EUR' });   // get() → { language, currency, languages, currencies }
+document.addEventListener('crafter:localization:changed', (e) => e.detail.currency);
+
+// Bölümleri yeniden çiz (?sections=), checkout'a git (/checkout?purpose=cart)
+await Crafter.sections.render(['main-cart', 'header-group:header']);
+Crafter.checkout();
+```
+
+Sepet ve SDK olayları: `crafter:ready`, `crafter:cart:updated`, `crafter:localization:changed` (hepsi `document` üzerinde,
+`event.detail` ile). v1 temalar ve harici sayfalar SDK'yı eskisi gibi kendisi yükler:
 
 ```html
-<!-- SDK Yükleme -->
-<script src="/assets/crafter.min.js"></script>
-
-<!-- Başlatma (Sıfır konfigürasyon yeterlidir, otomatik /api/storefront kullanır) -->
-<script>
-  window.crafter = new Crafter();
-</script>
+<script src="https://unpkg.com/@crafter-cms/sdk@1.4.0/dist/crafter.min.js"></script>
+<script>window.crafter = new Crafter();</script>
 ```
 
 > **Liquid Temalarında:** İstekler aynı origin altındaki `/api/storefront` proxy'sine yönlendirilir. Proxy, mağaza tenant'ını hostname üzerinden otomatik çözer ve HttpOnly token çerezlerini backend'e güvenle iletir.
@@ -111,7 +130,12 @@ const crafter = new Crafter({
 | **`crafter.luckperms`** | `/v2/modules/luckperms` *(v2)* | `getPlayer(usernameOrUuid)` *(Oyuncunun oyun içi ana rütbesi, yetkileri ve devralınan grupları)*, `getGroups()` |
 | **`crafter.website`** | `/` *(Kök / Site Bilgisi)* | `getInfo()` *(Sitenin adı, para birimi, logosu, faviconu ve aktif eklenti modülleri: discord_bot, authme vb.)* |
 | **`crafter.store`** | `/categories`, `/products`, `/config/marketplace` | `getCategories()`, `getCategory(id)`, `getProducts()`, `getProduct(id)`, `getProductsByCategory(catId)`, `getConfig()` *(Sepette toplu indirim ayarları)* |
-| **`crafter.cart` / `marketplace`** | `/marketplace` | `purchase({ productIds, coupon? })` *(Site bakiyesinden anında satın alım)* |
+| **`crafter.cart` / `marketplace`** | `/marketplace` | **Sepet:** `get()`, `add(product, qty?)`, `update(id, qty)`, `remove(id)`, `clear()`, `setCoupon(code)` *(localStorage 'cart'; `crafter:cart:updated`)*<br>`purchase({ productIds, coupon? })` *(Site bakiyesinden anında satın alım)*, `checkout(dto)` *(sağlayıcıda ödeme)* |
+| **`crafter.money`** | — | `format(amount, { convert?, currency?, locale? })`, `convert(amount)`, `currency`, `storeCurrency`, `rate` *(sayfa bağlamından)* |
+| **`crafter.localization`** | `POST /localization` | `get()`, `set({ language?, currency? }, { returnTo?, reload? })` |
+| **`crafter.sections`** | `?sections=` | `render(ids, { url?, swap? })` *(bölümleri yeniden çizer)* |
+| **`crafter.checkout()`** | `/checkout` | `checkout({ purpose?: 'cart' \| 'balance', amount?, navigate? })` |
+| **`crafter.dom`** | `document` | `on(name, fn)`, `emit(name, detail)` *(`crafter:<ad>` CustomEvent)* |
 | **`crafter.posts`** | `/v2/posts` *(v2)* | `list(query?)`, `getBySlug(slug)`, `get(idOrSlug)`, `like(id)`, `getUserLiked(userId, page, limit)` |
 | **`crafter.pages`** | `/v2/pages` *(v2)* | `list()` *(tüm yayındaki sayfalar)*, `getBySlug(slug)` |
 | **`crafter.statistics`** | `/v2/statistics` *(v2)* | `get(limit = 5)` *(Son alışverişler, ödemeler, kayıtlar, en çok yükleyenler / leaderboard)* |
