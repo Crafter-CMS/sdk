@@ -25,8 +25,12 @@ export default defineConfig([
       };
     },
     footer: {
+      // Sayfa bağlamı (window.__CRAFTER_CONTEXT__) varsa window.Crafter hazır örnek olur (#447); yoksa sınıf kalır
       js: `if (typeof window !== "undefined" && window.CrafterSDK) {
   window.Crafter = window.CrafterSDK.Crafter || window.CrafterSDK.default || window.CrafterSDK;
+  if (window.CrafterSDK.Crafter && typeof window.CrafterSDK.Crafter.autoInit === "function") {
+    try { window.CrafterSDK.Crafter.autoInit(window); } catch (e) { console.error("[Crafter SDK] auto-init:", e); }
+  }
 }`,
     },
   },

@@ -720,8 +720,8 @@ var UsersModule = class {
    * Enable Google Authenticator with 6-digit code.
    * POST /v2/users/me/2fa/authenticator/enable
    */
-  async enableAuthenticator(code) {
-    const res = await this.http.post("/v2/users/me/2fa/authenticator/enable", { code });
+  async enableAuthenticator(code2) {
+    const res = await this.http.post("/v2/users/me/2fa/authenticator/enable", { code: code2 });
     this.events.emit("2fa:enabled", { method: "authenticator", recoveryCodes: res?.recoveryCodes });
     return res;
   }
@@ -736,8 +736,8 @@ var UsersModule = class {
    * Enable Email 2FA with received code.
    * POST /v2/users/me/2fa/email/enable
    */
-  async enableEmail2Fa(code) {
-    const res = await this.http.post("/v2/users/me/2fa/email/enable", { code });
+  async enableEmail2Fa(code2) {
+    const res = await this.http.post("/v2/users/me/2fa/email/enable", { code: code2 });
     this.events.emit("2fa:enabled", { method: "email" });
     return res;
   }
@@ -752,8 +752,8 @@ var UsersModule = class {
    * Enable Discord 2FA with received code.
    * POST /v2/users/me/2fa/discord/enable
    */
-  async enableDiscord2Fa(code) {
-    const res = await this.http.post("/v2/users/me/2fa/discord/enable", { code });
+  async enableDiscord2Fa(code2) {
+    const res = await this.http.post("/v2/users/me/2fa/discord/enable", { code: code2 });
     this.events.emit("2fa:enabled", { method: "discord" });
     return res;
   }
@@ -1146,18 +1146,224 @@ var PaymentsModule = class {
   }
 };
 
+// src/modules/cart-store.ts
+var CART_STORAGE_KEY = "cart";
+var CART_COUPON_KEY = "crafter_cart_coupon";
+function storage() {
+  try {
+    return typeof localStorage !== "undefined" ? localStorage : null;
+  } catch {
+    return null;
+  }
+}
+function normalizeLines(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((item) => !!item && typeof item === "object" && !!item.id).map((item) => {
+    const images = Array.isArray(item.images) ? item.images.filter((src) => typeof src === "string" && src) : [];
+    if (!images.length && typeof item.image === "string" && item.image) images.push(item.image);
+    return {
+      ...item,
+      id: String(item.id),
+      name: typeof item.name === "string" ? item.name : "",
+      price: Number(item.price) || 0,
+      quantity: Math.max(1, Math.floor(Number(item.quantity) || 1)),
+      discountType: typeof item.discountType === "string" && item.discountType ? item.discountType : null,
+      discountValue: item.discountValue != null && item.discountValue !== "" ? Number(item.discountValue) : null,
+      images
+    };
+  });
+}
+var LocalStorageCartStore = class {
+  async read() {
+    const store = storage();
+    if (!store) return [];
+    try {
+      return normalizeLines(JSON.parse(store.getItem(CART_STORAGE_KEY) || "[]"));
+    } catch {
+      return [];
+    }
+  }
+  async write(lines) {
+    const store = storage();
+    if (!store) return;
+    try {
+      if (lines.length) store.setItem(CART_STORAGE_KEY, JSON.stringify(lines));
+      else store.removeItem(CART_STORAGE_KEY);
+    } catch {
+    }
+  }
+  async readCoupon() {
+    try {
+      return storage()?.getItem(CART_COUPON_KEY) || null;
+    } catch {
+      return null;
+    }
+  }
+  async writeCoupon(code2) {
+    const store = storage();
+    if (!store) return;
+    try {
+      if (code2) store.setItem(CART_COUPON_KEY, code2);
+      else store.removeItem(CART_COUPON_KEY);
+    } catch {
+    }
+  }
+  subscribe(onChange) {
+    if (typeof window === "undefined" || typeof window.addEventListener !== "function") return () => {
+    };
+    const listener = (event) => {
+      if (event.key === null || event.key === CART_STORAGE_KEY || event.key === CART_COUPON_KEY) onChange();
+    };
+    window.addEventListener("storage", listener);
+    return () => window.removeEventListener("storage", listener);
+  }
+};
+
+// src/core/dom-events.ts
+var DOM_EVENTS = {
+  ready: "crafter:ready",
+  cartUpdated: "crafter:cart:updated",
+  localizationChanged: "crafter:localization:changed"
+};
+function targetDocument() {
+  return typeof document !== "undefined" ? document : void 0;
+}
+function dispatchDomEvent(name, detail) {
+  const doc = targetDocument();
+  if (!doc || typeof doc.dispatchEvent !== "function" || typeof CustomEvent !== "function") return;
+  const type = name.startsWith("crafter:") ? name : `crafter:${name}`;
+  try {
+    doc.dispatchEvent(new CustomEvent(type, { detail }));
+  } catch (error) {
+    console.error(`[Crafter SDK] "${type}" olay\u0131 yay\u0131lamad\u0131:`, error);
+  }
+}
+var DomEvents = class {
+  constructor(events) {
+    this.events = events;
+  }
+  events;
+  /** SDK olay yoluna ve `document`'a birlikte yayar */
+  emit(name, detail) {
+    this.events.emit(name, detail);
+    dispatchDomEvent(name, detail);
+  }
+  /**
+   * `document` üzerindeki `crafter:<name>` olayını dinler; işleyici `event.detail` alır. Aboneliği kaldıran fonksiyon döner.
+   * @example crafter.dom.on('cart:updated', (cart) => badge.textContent = cart.itemCount)
+   */
+  on(name, handler) {
+    const doc = targetDocument();
+    if (!doc) return () => {
+    };
+    const type = name.startsWith("crafter:") ? name : `crafter:${name}`;
+    const listener = (event) => handler(event?.detail);
+    doc.addEventListener(type, listener);
+    return () => doc.removeEventListener(type, listener);
+  }
+};
+
 // src/modules/cart.ts
+function discountedUnitPrice(line) {
+  const price = Number(line.price) || 0;
+  const discount = Number(line.discountValue) || 0;
+  if (!line.discountType || discount <= 0) return price;
+  return line.discountType === "percentage" ? Math.max(0, price - price * discount / 100) : Math.max(0, price - discount);
+}
+var MAX_QUANTITY = 999;
 var CartModule = class {
-  constructor(http, events, options = {}) {
+  constructor(http, events, options = {}, deps = {}) {
     this.http = http;
     this.events = events;
     this.options = options;
     this.payments = new PaymentsModule(http, events, options);
+    this.store = deps.store ?? new LocalStorageCartStore();
+    this.dom = deps.dom ?? new DomEvents(events);
+    this.storeCurrency = deps.storeCurrency ?? (() => "");
+    this.store.subscribe(() => {
+      void this.get().then((cart) => this.dom.emit("cart:updated", cart));
+    });
   }
   http;
   events;
   options;
   payments;
+  store;
+  dom;
+  storeCurrency;
+  // ===================== Sepet içeriği (#447) =====================
+  /** Sepetin güncel hali */
+  async get() {
+    const [lines, coupon] = await Promise.all([this.store.read(), this.store.readCoupon()]);
+    const items = lines.map((line) => {
+      const unitPrice = discountedUnitPrice(line);
+      return { ...line, image: line.images?.[0] || null, unitPrice, lineTotal: unitPrice * line.quantity };
+    });
+    return {
+      items,
+      itemCount: items.reduce((sum, line) => sum + line.quantity, 0),
+      subtotal: items.reduce((sum, line) => sum + line.lineTotal, 0),
+      currency: this.storeCurrency(),
+      coupon
+    };
+  }
+  /** Ürünü ekler; sepette varsa adedi artar. `crafter:cart:updated` yayar. */
+  async add(product, quantity = 1) {
+    if (product?.id === void 0 || product.id === null || product.id === "") {
+      throw new TypeError("[Crafter SDK] cart.add: \xFCr\xFCn id gerekli");
+    }
+    const id = String(product.id);
+    const amount = Math.max(1, Math.floor(Number(quantity) || 1));
+    const lines = await this.store.read();
+    const existing = lines.find((line) => line.id === id);
+    if (existing) {
+      existing.quantity = Math.min(MAX_QUANTITY, existing.quantity + amount);
+    } else {
+      const images = Array.isArray(product.images) ? product.images.filter(Boolean) : product.image ? [product.image] : [];
+      lines.push(
+        ...normalizeLines([
+          {
+            id,
+            name: product.name ?? "",
+            price: Number(product.price) || 0,
+            quantity: Math.min(MAX_QUANTITY, amount),
+            discountType: product.discountType || null,
+            discountValue: product.discountValue ?? null,
+            images
+          }
+        ])
+      );
+    }
+    return this.commit(lines);
+  }
+  /** Satırın adedini ayarlar; 0 ya da altı satırı siler */
+  async update(id, quantity) {
+    const key = String(id);
+    const next = Math.floor(Number(quantity) || 0);
+    const lines = (await this.store.read()).map((line) => line.id === key ? { ...line, quantity: Math.min(MAX_QUANTITY, next) } : line).filter((line) => line.quantity > 0);
+    return this.commit(lines);
+  }
+  async remove(id) {
+    const key = String(id);
+    return this.commit((await this.store.read()).filter((line) => line.id !== key));
+  }
+  /** Sepeti ve kuponu boşaltır */
+  async clear() {
+    await this.store.writeCoupon(null);
+    return this.commit([]);
+  }
+  /** Checkout'ta uygulanacak kupon kodu; null kaldırır */
+  async setCoupon(code2) {
+    await this.store.writeCoupon(code2 ? String(code2).trim() || null : null);
+    return this.commit(await this.store.read());
+  }
+  async commit(lines) {
+    await this.store.write(lines);
+    const cart = await this.get();
+    this.dom.emit("cart:updated", cart);
+    return cart;
+  }
+  // ===================== Ödeme =====================
   /**
    * Complete purchase using user balance.
    * POST /marketplace/purchase
@@ -1304,19 +1510,19 @@ function lexicalToHtml(node, options) {
   if (node.children) {
     html = lexicalToHtml(node.children, options);
   }
-  const plain = options?.plainSemantic === true;
+  const plain2 = options?.plainSemantic === true;
   const getBlockAttributes = (defaultClasses = "") => {
     const styles = [];
-    const classes = plain ? [] : defaultClasses ? [defaultClasses] : [];
+    const classes = plain2 ? [] : defaultClasses ? [defaultClasses] : [];
     if (node.format) {
       if (node.format === "center") {
-        plain ? styles.push("text-align: center") : classes.push("text-center");
+        plain2 ? styles.push("text-align: center") : classes.push("text-center");
       } else if (node.format === "right") {
-        plain ? styles.push("text-align: right") : classes.push("text-right");
+        plain2 ? styles.push("text-align: right") : classes.push("text-right");
       } else if (node.format === "justify") {
-        plain ? styles.push("text-align: justify") : classes.push("text-justify");
+        plain2 ? styles.push("text-align: justify") : classes.push("text-justify");
       } else if (node.format === "left" || node.format === "start") {
-        plain ? styles.push("text-align: left") : classes.push("text-left");
+        plain2 ? styles.push("text-align: left") : classes.push("text-left");
       }
     }
     if (node.indent && typeof node.indent === "number" && node.indent > 0) {
@@ -1355,7 +1561,7 @@ function lexicalToHtml(node, options) {
       if (node.checked !== void 0) {
         const isChecked = Boolean(node.checked);
         const checkbox = `<input type="checkbox" disabled ${isChecked ? "checked " : ""}class="mr-2 inline-block rounded" />`;
-        const content = plain ? html : `<span class="${isChecked ? "line-through text-gray-400" : "text-gray-700"}">${html}</span>`;
+        const content = plain2 ? html : `<span class="${isChecked ? "line-through text-gray-400" : "text-gray-700"}">${html}</span>`;
         return `<li class="flex items-center space-x-2 my-1" data-checked="${isChecked}">${checkbox}${content}</li>`;
       }
       return `<li>${html}</li>`;
@@ -1372,14 +1578,14 @@ function lexicalToHtml(node, options) {
       const targetAttr = node.target ? ` target="${escapeHtml(node.target)}"` : "";
       const relAttr = node.rel ? ` rel="${escapeHtml(node.rel)}"` : "";
       const titleAttr = node.title ? ` title="${escapeHtml(node.title)}"` : "";
-      const classAttr = plain ? "" : ' class="text-primary hover:text-blue-700 hover:underline font-bold transition-colors"';
+      const classAttr = plain2 ? "" : ' class="text-primary hover:text-blue-700 hover:underline font-bold transition-colors"';
       return `<a href="${url}"${classAttr}${targetAttr}${relAttr}${titleAttr}>${html}</a>`;
     }
     case "image":
     case "inline-image": {
       const src = escapeHtml(node.src || "");
       const alt = escapeHtml(node.altText || "");
-      const classAttr = plain ? "" : ' class="rounded-2xl w-full max-h-[500px] object-cover my-8 shadow-sm border border-gray-100"';
+      const classAttr = plain2 ? "" : ' class="rounded-2xl w-full max-h-[500px] object-cover my-8 shadow-sm border border-gray-100"';
       const widthAttr = node.width && node.width !== "inherit" ? ` width="${node.width}"` : "";
       const heightAttr = node.height && node.height !== "inherit" ? ` height="${node.height}"` : "";
       return `<img src="${src}" alt="${alt}"${classAttr}${widthAttr}${heightAttr} />`;
@@ -1387,18 +1593,18 @@ function lexicalToHtml(node, options) {
     case "code": {
       const language = node.language || "";
       const langClass = language ? ` class="language-${escapeHtml(language)}"` : "";
-      const preClass = plain ? "" : ' class="bg-gray-900 text-gray-100 p-5 rounded-2xl overflow-x-auto my-6 text-sm font-mono shadow-lg"';
+      const preClass = plain2 ? "" : ' class="bg-gray-900 text-gray-100 p-5 rounded-2xl overflow-x-auto my-6 text-sm font-mono shadow-lg"';
       return `<pre${preClass}><code${langClass}>${html}</code></pre>`;
     }
     case "code-highlight": {
       return html;
     }
     case "table": {
-      const tableClass = plain ? "" : ' class="w-full my-6 border-collapse border border-gray-200 shadow-sm rounded-lg overflow-hidden"';
+      const tableClass = plain2 ? "" : ' class="w-full my-6 border-collapse border border-gray-200 shadow-sm rounded-lg overflow-hidden"';
       return `<div class="overflow-x-auto"><table${tableClass}><tbody>${html}</tbody></table></div>`;
     }
     case "tablerow": {
-      const trClass = plain ? "" : ' class="border-b border-gray-200 even:bg-gray-50/50"';
+      const trClass = plain2 ? "" : ' class="border-b border-gray-200 even:bg-gray-50/50"';
       return `<tr${trClass}>${html}</tr>`;
     }
     case "tablecell": {
@@ -1408,12 +1614,12 @@ function lexicalToHtml(node, options) {
       const rowSpan = node.rowSpan && node.rowSpan > 1 ? ` rowspan="${node.rowSpan}"` : "";
       const bgStyle = node.backgroundColor ? `background-color: ${node.backgroundColor};` : "";
       const styleAttr = bgStyle ? ` style="${bgStyle}"` : "";
-      const cellClass = plain ? "" : isHeader ? ' class="px-4 py-3 text-left font-bold text-gray-900 bg-gray-100 border border-gray-200"' : ' class="px-4 py-3 text-gray-700 border border-gray-200"';
+      const cellClass = plain2 ? "" : isHeader ? ' class="px-4 py-3 text-left font-bold text-gray-900 bg-gray-100 border border-gray-200"' : ' class="px-4 py-3 text-gray-700 border border-gray-200"';
       return `<${cellTag}${cellClass}${colSpan}${rowSpan}${styleAttr}>${html}</${cellTag}>`;
     }
     case "horizontalrule":
     case "hr": {
-      const hrClass = plain ? "" : ' class="my-8 border-t border-gray-200"';
+      const hrClass = plain2 ? "" : ' class="my-8 border-t border-gray-200"';
       return `<hr${hrClass} />`;
     }
     case "linebreak":
@@ -1424,7 +1630,7 @@ function lexicalToHtml(node, options) {
       let text = escapeHtml(node.text || "");
       const format = node.format || 0;
       if (format & IS_BOLD) {
-        text = plain ? `<strong>${text}</strong>` : `<strong class="font-bold text-gray-900">${text}</strong>`;
+        text = plain2 ? `<strong>${text}</strong>` : `<strong class="font-bold text-gray-900">${text}</strong>`;
       }
       if (format & IS_ITALIC) {
         text = `<em>${text}</em>`;
@@ -1436,7 +1642,7 @@ function lexicalToHtml(node, options) {
         text = `<u>${text}</u>`;
       }
       if (format & IS_CODE) {
-        text = plain ? `<code>${text}</code>` : `<code class="bg-gray-100 text-pink-600 px-1.5 py-0.5 rounded-lg text-sm font-mono border border-gray-200">${text}</code>`;
+        text = plain2 ? `<code>${text}</code>` : `<code class="bg-gray-100 text-pink-600 px-1.5 py-0.5 rounded-lg text-sm font-mono border border-gray-200">${text}</code>`;
       }
       if (format & IS_SUBSCRIPT) {
         text = `<sub>${text}</sub>`;
@@ -2056,8 +2262,8 @@ var RedeemCodeModule = class {
    * Redeem gift/promo code.
    * POST /redeem-codes/use
    */
-  async use(code) {
-    const response = await this.http.post("/redeem-codes/use", { code });
+  async use(code2) {
+    const response = await this.http.post("/redeem-codes/use", { code: code2 });
     this.events.emit("redeem:used", response);
     return response;
   }
@@ -2525,19 +2731,236 @@ var CurrenciesModule = class {
 function formatMoney(amount, currency, locale) {
   const value = typeof amount === "number" ? amount : Number(amount);
   const n = Number.isFinite(value) ? value : 0;
-  const code = String(currency || "").trim().toUpperCase();
+  const code2 = String(currency || "").trim().toUpperCase();
   try {
-    return new Intl.NumberFormat(locale, { style: "currency", currency: code }).format(n);
+    return new Intl.NumberFormat(locale, { style: "currency", currency: code2 }).format(n);
   } catch {
-    return code ? `${n.toFixed(2)} ${code}` : n.toFixed(2);
+    return code2 ? `${n.toFixed(2)} ${code2}` : n.toFixed(2);
   }
 }
 
+// src/modules/money.ts
+var CODE = /^[A-Z]{3}$/;
+function code(value) {
+  const upper = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return CODE.test(upper) ? upper : "";
+}
+function currencyDigits(currency) {
+  try {
+    const digits = new Intl.NumberFormat("en-US", { style: "currency", currency }).resolvedOptions().maximumFractionDigits;
+    return typeof digits === "number" ? digits : 2;
+  } catch {
+    return 2;
+  }
+}
+function round(value, currency) {
+  const factor = Math.pow(10, currencyDigits(currency));
+  return Math.round(Number((value * factor).toFixed(6))) / factor;
+}
+var MoneyModule = class {
+  constructor(getContext) {
+    this.getContext = getContext;
+  }
+  getContext;
+  /** Mağaza para birimi; bağlam yoksa boş */
+  get storeCurrency() {
+    return code(this.getContext()?.storeCurrency);
+  }
+  /** Müşterinin para birimi; kur geçersizse mağaza para birimi */
+  get currency() {
+    const ctx = this.getContext();
+    const customer = code(ctx?.customerCurrency);
+    return customer && this.rateOf(ctx) ? customer : this.storeCurrency;
+  }
+  /** 1 mağaza birimi = rate müşteri birimi; müşteri para birimi mağazanınkiyse 1 */
+  get rate() {
+    return this.currency === this.storeCurrency ? 1 : this.rateOf(this.getContext()) || 1;
+  }
+  /** Mağaza tutarını müşteri para birimine çevirir ve o birimin hanesine yuvarlar */
+  convert(storeAmount) {
+    const value = Number(storeAmount);
+    const n = Number.isFinite(value) ? value : 0;
+    const target = this.currency;
+    return target ? round(n * this.rate, target) : n;
+  }
+  /**
+   * @example Crafter.money.format(19.99)                    // '€18,40' (EUR müşteri, de)
+   * @example Crafter.money.format(250, { convert: false })  // mağaza para biriminde
+   */
+  format(amount, options = {}) {
+    const ctx = this.getContext();
+    const locale = options.locale || ctx?.locale || void 0;
+    const explicit = code(options.currency);
+    if (explicit) return formatMoney(amount, explicit, locale);
+    if (options.convert === false) {
+      return this.storeCurrency ? formatMoney(amount, this.storeCurrency, locale) : plain(amount);
+    }
+    const target = this.currency;
+    return target ? formatMoney(this.convert(amount), target, locale) : plain(amount);
+  }
+  rateOf(ctx) {
+    const rate = Number(ctx?.rate);
+    return Number.isFinite(rate) && rate > 0 ? rate : 0;
+  }
+};
+function plain(amount) {
+  const value = Number(amount);
+  return (Number.isFinite(value) ? value : 0).toFixed(2);
+}
+
+// src/core/context.ts
+var CONTEXT_GLOBAL = "__CRAFTER_CONTEXT__";
+function readPageContext(win = typeof window !== "undefined" ? window : void 0) {
+  const raw = win?.[CONTEXT_GLOBAL];
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
+}
+function stripLocalePrefix(pathname, prefix) {
+  if (!prefix || prefix === "/") return pathname || "/";
+  if (pathname === prefix) return "/";
+  return pathname.startsWith(`${prefix}/`) ? pathname.slice(prefix.length) : pathname;
+}
+
+// src/modules/localization.ts
+function safePath(value) {
+  if (typeof value !== "string" || !value.trim()) return "/";
+  const path = value.trim();
+  if (!path.startsWith("/") || path.startsWith("//") || path.startsWith("/\\") || /[\u0000-\u001f\u007f]/.test(path)) return "/";
+  return path;
+}
+var LocalizationModule = class {
+  constructor(getContext, dom) {
+    this.getContext = getContext;
+    this.dom = dom;
+  }
+  getContext;
+  dom;
+  get() {
+    const ctx = this.getContext();
+    const htmlLang = typeof document !== "undefined" ? document.documentElement?.lang : "";
+    const store = ctx?.storeCurrency || "";
+    return {
+      language: ctx?.locale || htmlLang || "",
+      currency: ctx?.customerCurrency || store,
+      languages: Array.isArray(ctx?.languages) ? [...ctx.languages] : [],
+      currencies: Array.isArray(ctx?.currencies) ? [...ctx.currencies] : store ? [store] : []
+    };
+  }
+  /**
+   * Dili ve/veya para birimini değiştirir. Varsayılan olarak sayfa seçilen dildeki adrese gider.
+   * `crafter:localization:changed` olayı (`{ language, currency, url }`) gezinmeden önce yayılır.
+   */
+  async set(change, options = {}) {
+    const ctx = this.getContext();
+    const body = new URLSearchParams();
+    if (change.language) body.set("language", String(change.language));
+    if (change.currency) body.set("currency", String(change.currency).toUpperCase());
+    const returnTo = safePath(options.returnTo ?? currentPath(ctx));
+    body.set("return_to", returnTo);
+    const endpoint = ctx?.routes?.localization || "/localization";
+    let response;
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+        body: body.toString()
+      });
+    } catch (error) {
+      throw new CrafterError({ statusCode: 0, message: error?.message || "localization request failed" });
+    }
+    if (!response.ok) {
+      throw new CrafterError({ statusCode: response.status, message: `localization: HTTP ${response.status}` });
+    }
+    let url = "";
+    if ((response.headers.get("content-type") || "").includes("application/json")) {
+      const data = await response.json().catch(() => null);
+      if (data && typeof data.location === "string") url = safePath(data.location);
+    }
+    if (!url && response.redirected && response.url) {
+      try {
+        const final = new URL(response.url);
+        url = safePath(final.pathname + final.search);
+      } catch {
+      }
+    }
+    if (!url) url = returnTo;
+    const state = this.get();
+    this.dom.emit("localization:changed", {
+      language: change.language || state.language,
+      currency: change.currency ? String(change.currency).toUpperCase() : state.currency,
+      url
+    });
+    if (options.reload !== false && typeof window !== "undefined" && window.location) {
+      window.location.assign(url);
+    }
+    return { url };
+  }
+};
+function currentPath(ctx) {
+  if (typeof window === "undefined" || !window.location) return "/";
+  return stripLocalePrefix(window.location.pathname, ctx?.localePrefix) + (window.location.search || "");
+}
+
+// src/modules/sections.ts
+var MAX_SECTIONS = 10;
+function instanceId(key) {
+  const index = key.indexOf(":");
+  return index === -1 ? key : key.slice(index + 1);
+}
+var SectionsModule = class {
+  async render(ids, options = {}) {
+    const list = Array.from(new Set((ids || []).map((id) => String(id).trim()).filter(Boolean)));
+    if (list.length === 0 || list.length > MAX_SECTIONS) {
+      throw new CrafterError({ statusCode: 400, message: `sections.render: 1-${MAX_SECTIONS} b\xF6l\xFCm` });
+    }
+    const base = options.url ?? (typeof window !== "undefined" && window.location ? window.location.pathname + window.location.search : "/");
+    const url = new URL(base, typeof window !== "undefined" && window.location ? window.location.href : "http://localhost");
+    url.searchParams.set("sections", list.join(","));
+    const response = await fetch(url.pathname + url.search, {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" }
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data || typeof data !== "object") {
+      throw CrafterError.fromResponse(response.status || 500, data);
+    }
+    const result = {};
+    for (const key of list) {
+      const html = typeof data[key] === "string" ? data[key] : null;
+      result[key] = html;
+      if (html !== null && options.swap !== false) swapSection(instanceId(key), html);
+    }
+    return result;
+  }
+};
+function swapSection(id, html) {
+  if (typeof document === "undefined") return;
+  const current = document.getElementById(`crafter-section-${id}`);
+  if (!current) return;
+  const holder = document.createElement("div");
+  holder.innerHTML = html;
+  const next = holder.firstElementChild;
+  if (next) current.replaceWith(next);
+}
+
+// src/version.ts
+var SDK_VERSION = "1.4.0";
+
 // src/index.ts
-var Crafter = class {
+var PREVIEW_PARAMS = ["themeId", "preview_theme_id", "preview_ts", "preview_token"];
+var Crafter = class _Crafter {
+  static version = SDK_VERSION;
+  version = SDK_VERSION;
   config;
   http;
   events;
+  /** `document` olayları: `crafter.dom.on('cart:updated', fn)` */
+  dom;
+  /** Sayfa bağlamı (storefront'un yazdığı `window.__CRAFTER_CONTEXT__`); yoksa null */
+  context;
+  money;
+  localization;
+  sections;
   auth;
   users;
   store;
@@ -2609,12 +3032,21 @@ var Crafter = class {
       apiBase: "/api/storefront",
       ...config
     };
+    this.context = this.config.context ?? null;
     this.events = new EventEmitter();
+    this.dom = new DomEvents(this.events);
     this.http = new HttpClient(this.config);
+    const getContext = () => this.context;
+    this.money = new MoneyModule(getContext);
+    this.localization = new LocalizationModule(getContext, this.dom);
+    this.sections = new SectionsModule();
     this.auth = new AuthModule(this.http, this.events);
     this.users = new UsersModule(this.http, this.events);
     this.store = new StoreModule(this.http, this.events);
-    const cartModule = new CartModule(this.http, this.events, this.config);
+    const cartModule = new CartModule(this.http, this.events, this.config, {
+      dom: this.dom,
+      storeCurrency: () => this.money.storeCurrency
+    });
     this.cart = cartModule;
     this.marketplace = cartModule;
     this.chest = new ChestModule(this.http, this.events);
@@ -2642,6 +3074,49 @@ var Crafter = class {
     this.licenses = new LicensesModule(this.http, this.events);
     this.currencies = new CurrenciesModule(this.http, this.events, this.config);
   }
+  /**
+   * Checkout sayfasına gider (#447). Sepet için `/checkout?purpose=cart`; checkout dil önekiyle açılmaz,
+   * dili gelinen sayfadan okur. Adres sayfa bağlamından (`routes.checkout`) gelir.
+   */
+  checkout(options = {}) {
+    const params = new URLSearchParams();
+    params.set("purpose", options.purpose === "balance" ? "balance" : "cart");
+    if (options.purpose === "balance" && Number(options.amount) > 0) params.set("amount", String(options.amount));
+    const hasWindow = typeof window !== "undefined" && !!window.location;
+    if (hasWindow) {
+      const current = new URLSearchParams(window.location.search);
+      for (const key of PREVIEW_PARAMS) {
+        const value = current.get(key);
+        if (value) params.set(key, value);
+      }
+    }
+    const base = this.context?.routes?.checkout || "/checkout";
+    const url = `${base}?${params.toString()}`;
+    if (options.navigate !== false && hasWindow) window.location.assign(url);
+    return url;
+  }
+  /**
+   * Tarayıcı derlemesinin (IIFE) otomatik başlatması (#447). Sayfada `window.__CRAFTER_CONTEXT__` varsa
+   * `window.Crafter` bu bağlamla kurulmuş örnek olur ve `document`'a `crafter:ready` yayılır; yoksa null döner
+   * (`window.Crafter` sınıf olarak kalır, `new Crafter({...})` eskisi gibi çalışır). İkinci çağrı aynı örneği döner.
+   */
+  static autoInit(win = typeof window !== "undefined" ? window : void 0) {
+    const context = readPageContext(win);
+    if (!win || !context) return null;
+    if (win.Crafter instanceof _Crafter) return win.Crafter;
+    const crafter = new _Crafter({
+      mode: "storefront",
+      apiBase: context.apiBase || "/api/storefront",
+      websiteId: context.websiteId,
+      context
+    });
+    win.Crafter = crafter;
+    const doc = win.document;
+    if (doc && typeof doc.dispatchEvent === "function" && typeof CustomEvent === "function") {
+      doc.dispatchEvent(new CustomEvent(DOM_EVENTS.ready, { detail: crafter }));
+    }
+    return crafter;
+  }
   on(event, handler) {
     return this.events.on(event, handler);
   }
@@ -2658,6 +3133,9 @@ var Crafter = class {
 var index_default = Crafter;
 
 exports.AuthModule = AuthModule;
+exports.CART_COUPON_KEY = CART_COUPON_KEY;
+exports.CART_STORAGE_KEY = CART_STORAGE_KEY;
+exports.CONTEXT_GLOBAL = CONTEXT_GLOBAL;
 exports.CartModule = CartModule;
 exports.ChestModule = ChestModule;
 exports.CouponsModule = CouponsModule;
@@ -2667,6 +3145,8 @@ exports.CrafterError = CrafterError;
 exports.CrafterOutOfStockError = CrafterOutOfStockError;
 exports.CrafterPaymentProviderError = CrafterPaymentProviderError;
 exports.CurrenciesModule = CurrenciesModule;
+exports.DOM_EVENTS = DOM_EVENTS;
+exports.DomEvents = DomEvents;
 exports.EventEmitter = EventEmitter;
 exports.ForumModule = ForumModule;
 exports.HelpcenterModule = HelpcenterModule;
@@ -2681,7 +3161,10 @@ exports.IS_SUPERSCRIPT = IS_SUPERSCRIPT;
 exports.IS_UNDERLINE = IS_UNDERLINE;
 exports.LegalModule = LegalModule;
 exports.LicensesModule = LicensesModule;
+exports.LocalStorageCartStore = LocalStorageCartStore;
+exports.LocalizationModule = LocalizationModule;
 exports.LuckPermsModule = LuckPermsModule;
+exports.MoneyModule = MoneyModule;
 exports.PagesModule = PagesModule;
 exports.PaymentErrorType = PaymentErrorType;
 exports.PaymentsModule = PaymentsModule;
@@ -2689,7 +3172,9 @@ exports.PostsModule = PostsModule;
 exports.PunishmentsModule = PunishmentsModule;
 exports.RedeemCodeModule = RedeemCodeModule;
 exports.ReportsModule = ReportsModule;
+exports.SDK_VERSION = SDK_VERSION;
 exports.SearchModule = SearchModule;
+exports.SectionsModule = SectionsModule;
 exports.SeoModule = SeoModule;
 exports.ServersModule = ServersModule;
 exports.StaffFormsModule = StaffFormsModule;
@@ -2699,7 +3184,10 @@ exports.TicketsModule = TicketsModule;
 exports.UsersModule = UsersModule;
 exports.VoteModule = VoteModule;
 exports.WebsiteModule = WebsiteModule;
+exports.currencyDigits = currencyDigits;
 exports.default = index_default;
+exports.discountedUnitPrice = discountedUnitPrice;
+exports.dispatchDomEvent = dispatchDomEvent;
 exports.formatMoney = formatMoney;
 exports.htmlToLexical = htmlToLexical;
 exports.isBalanceTopUpError = isBalanceTopUpError;
@@ -2711,10 +3199,13 @@ exports.legalTermsHeaders = legalTermsHeaders;
 exports.lexicalToHtml = lexicalToHtml;
 exports.lexicalToPlainText = lexicalToPlainText;
 exports.lexicalToText = lexicalToText;
+exports.normalizeLines = normalizeLines;
 exports.normalizePaymentResponse = normalizePaymentResponse;
 exports.parsePaymentStatus = parsePaymentStatus;
 exports.parseTaxBreakdown = parseTaxBreakdown;
 exports.payWithQuote = payWithQuote;
+exports.readPageContext = readPageContext;
+exports.stripLocalePrefix = stripLocalePrefix;
 exports.toLexical = toLexical;
 exports.topUpMaxAmount = topUpMaxAmount;
 //# sourceMappingURL=index.js.map

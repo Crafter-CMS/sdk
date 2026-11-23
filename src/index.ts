@@ -27,6 +27,12 @@ import { LuckPermsModule } from './modules/luckperms';
 import { WebsiteModule } from './modules/website';
 import { LicensesModule } from './modules/licenses';
 import { CurrenciesModule } from './modules/currencies';
+import { MoneyModule } from './modules/money';
+import { LocalizationModule } from './modules/localization';
+import { SectionsModule } from './modules/sections';
+import { CrafterPageContext, readPageContext } from './core/context';
+import { DomEvents, DOM_EVENTS } from './core/dom-events';
+import { SDK_VERSION } from './version';
 import { formatMoney } from './utils/money';
 import {
   lexicalToHtml,
@@ -45,10 +51,32 @@ import {
   IS_HIGHLIGHT,
 } from './utils/lexical';
 
+/** `crafter.checkout()` seçenekleri */
+export interface CheckoutNavigateOptions {
+  /** 'cart' (varsayılan): sepet ödemesi; 'balance': bakiye yükleme */
+  purpose?: 'cart' | 'balance';
+  /** Bakiye yüklemede önerilen tutar (mağaza para biriminde) */
+  amount?: number;
+  /** false: gezinmez, yalnızca adresi döner */
+  navigate?: boolean;
+}
+
+/** Önizleme / editör parametreleri checkout'a taşınır (tema önizlemesi doğru mağaza temasıyla açılsın) */
+const PREVIEW_PARAMS = ['themeId', 'preview_theme_id', 'preview_ts', 'preview_token'];
+
 export class Crafter {
+  public static readonly version = SDK_VERSION;
+  public readonly version = SDK_VERSION;
   public readonly config: CrafterConfig;
   public readonly http: HttpClient;
   public readonly events: EventEmitter;
+  /** `document` olayları: `crafter.dom.on('cart:updated', fn)` */
+  public readonly dom: DomEvents;
+  /** Sayfa bağlamı (storefront'un yazdığı `window.__CRAFTER_CONTEXT__`); yoksa null */
+  public readonly context: CrafterPageContext | null;
+  public readonly money: MoneyModule;
+  public readonly localization: LocalizationModule;
+  public readonly sections: SectionsModule;
 
   public readonly auth: AuthModule;
   public readonly users: UsersModule;
@@ -125,14 +153,23 @@ export class Crafter {
       ...config,
     };
 
+    this.context = this.config.context ?? null;
     this.events = new EventEmitter();
+    this.dom = new DomEvents(this.events);
     this.http = new HttpClient(this.config);
+    const getContext = () => this.context;
+    this.money = new MoneyModule(getContext);
+    this.localization = new LocalizationModule(getContext, this.dom);
+    this.sections = new SectionsModule();
 
     this.auth = new AuthModule(this.http, this.events);
     this.users = new UsersModule(this.http, this.events);
     this.store = new StoreModule(this.http, this.events);
     
-    const cartModule = new CartModule(this.http, this.events, this.config);
+    const cartModule = new CartModule(this.http, this.events, this.config, {
+      dom: this.dom,
+      storeCurrency: () => this.money.storeCurrency,
+    });
     this.cart = cartModule;
     this.marketplace = cartModule;
 
@@ -162,6 +199,51 @@ export class Crafter {
     this.website = new WebsiteModule(this.http, this.events);
     this.licenses = new LicensesModule(this.http, this.events);
     this.currencies = new CurrenciesModule(this.http, this.events, this.config);
+  }
+
+  /**
+   * Checkout sayfasına gider (#447). Sepet için `/checkout?purpose=cart`; checkout dil önekiyle açılmaz,
+   * dili gelinen sayfadan okur. Adres sayfa bağlamından (`routes.checkout`) gelir.
+   */
+  public checkout(options: CheckoutNavigateOptions = {}): string {
+    const params = new URLSearchParams();
+    params.set('purpose', options.purpose === 'balance' ? 'balance' : 'cart');
+    if (options.purpose === 'balance' && Number(options.amount) > 0) params.set('amount', String(options.amount));
+    const hasWindow = typeof window !== 'undefined' && !!window.location;
+    if (hasWindow) {
+      const current = new URLSearchParams(window.location.search);
+      for (const key of PREVIEW_PARAMS) {
+        const value = current.get(key);
+        if (value) params.set(key, value);
+      }
+    }
+    const base = this.context?.routes?.checkout || '/checkout';
+    const url = `${base}?${params.toString()}`;
+    if (options.navigate !== false && hasWindow) window.location.assign(url);
+    return url;
+  }
+
+  /**
+   * Tarayıcı derlemesinin (IIFE) otomatik başlatması (#447). Sayfada `window.__CRAFTER_CONTEXT__` varsa
+   * `window.Crafter` bu bağlamla kurulmuş örnek olur ve `document`'a `crafter:ready` yayılır; yoksa null döner
+   * (`window.Crafter` sınıf olarak kalır, `new Crafter({...})` eskisi gibi çalışır). İkinci çağrı aynı örneği döner.
+   */
+  public static autoInit(win: any = typeof window !== 'undefined' ? window : undefined): Crafter | null {
+    const context = readPageContext(win);
+    if (!win || !context) return null;
+    if (win.Crafter instanceof Crafter) return win.Crafter;
+    const crafter = new Crafter({
+      mode: 'storefront',
+      apiBase: context.apiBase || '/api/storefront',
+      websiteId: context.websiteId,
+      context,
+    });
+    win.Crafter = crafter;
+    const doc = win.document;
+    if (doc && typeof doc.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+      doc.dispatchEvent(new CustomEvent(DOM_EVENTS.ready, { detail: crafter }));
+    }
+    return crafter;
   }
 
   // ===================== Event Shorthands =====================
@@ -223,5 +305,12 @@ export * from './modules/luckperms';
 export * from './modules/website';
 export * from './modules/licenses';
 export * from './modules/currencies';
+export * from './modules/money';
+export * from './modules/localization';
+export * from './modules/sections';
+export * from './modules/cart-store';
+export * from './core/context';
+export * from './core/dom-events';
+export * from './version';
 export * from './utils/money';
 export * from './utils/lexical';

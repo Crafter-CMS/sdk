@@ -47,6 +47,12 @@ export interface CrafterConfig {
    * Backend ödeme yanıtında anahtar döndürürse o önceliklidir. Gizli değildir.
    */
   stripePublishableKey?: string;
+
+  /**
+   * Sayfa bağlamı (#447): storefront'un `window.__CRAFTER_CONTEXT__` nesnesi. Para gösterimi, dil seçimi ve
+   * checkout adresi buradan okunur. Tema sayfalarında SDK kendiliğinden verir.
+   */
+  context?: import('../core/context').CrafterPageContext;
 }
 
 export interface RequestOptions extends RequestInit {
@@ -1171,6 +1177,10 @@ export interface CrafterEventMap {
   // ================= Store & Cart =================
   'cart:purchased': PurchaseResponse;
   'cart:checkout': CheckoutPaymentResponse;
+  /** Sepet değişti (ekle / güncelle / sil / başka sekme); `document`'ta `crafter:cart:updated` */
+  'cart:updated': import('../modules/cart').CartState;
+  /** Dil / para birimi seçildi; `document`'ta `crafter:localization:changed` */
+  'localization:changed': { language: string; currency: string; url: string };
   'license:verified': { valid: boolean; productId?: string; type?: string; downloadable?: boolean };
 
   // ================= Chest =================

@@ -1,3 +1,367 @@
+declare class HttpClient {
+    readonly mode: 'storefront' | 'direct';
+    private config;
+    private token;
+    private storageKey;
+    constructor(config?: CrafterConfig);
+    /**
+     * Safe getter for stored token from localStorage
+     */
+    private readTokenFromStorage;
+    /**
+     * Get current auth token
+     */
+    getToken(): string | null;
+    /**
+     * Set or clear auth token
+     */
+    setToken(token: string | null): void;
+    /**
+     * Clear active auth token
+     */
+    clearToken(): void;
+    /**
+     * Resolves the full URL for an endpoint according to SDK operating mode:
+     *
+     * Mode 1: 'storefront' (Liquid themes)
+     * - Prepends '/api/storefront':
+     *   /v2/auth/signin      -> /api/storefront/v2/auth/signin
+     *   /products            -> /api/storefront/products
+     *
+     * Mode 2: 'direct' (Headless apps, external scripts, Node)
+     * - Prepends 'https://api.crafter.net.tr/website/{v2/}:websiteId/...':
+     *   /v2/auth/signin      -> https://api.crafter.net.tr/website/v2/:websiteId/auth/signin
+     *   /products            -> https://api.crafter.net.tr/website/:websiteId/products
+     *   /payment/initiate    -> https://api.crafter.net.tr/website/payment/initiate
+     */
+    buildUrl(path: string, options?: RequestOptions): string;
+    private appendParams;
+    /**
+     * Core request dispatcher with automatic credentials (cookies) & token header
+     */
+    request<T = any>(endpoint: string, options?: RequestOptions): Promise<T>;
+    get<T = any>(endpoint: string, options?: RequestOptions): Promise<T>;
+    post<T = any>(endpoint: string, body?: any, options?: RequestOptions): Promise<T>;
+    put<T = any>(endpoint: string, body?: any, options?: RequestOptions): Promise<T>;
+    patch<T = any>(endpoint: string, body?: any, options?: RequestOptions): Promise<T>;
+    delete<T = any>(endpoint: string, options?: RequestOptions): Promise<T>;
+}
+
+type EventHandler<T = any> = (payload: T) => void;
+declare class EventEmitter {
+    private listeners;
+    /**
+     * Subscribe to an event.
+     */
+    on<K extends keyof CrafterEventMap>(event: K, handler: EventHandler<CrafterEventMap[K]>): () => void;
+    on(event: string, handler: EventHandler): () => void;
+    /**
+     * Unsubscribe a handler from an event.
+     */
+    off<K extends keyof CrafterEventMap>(event: K, handler: EventHandler<CrafterEventMap[K]>): void;
+    off(event: string, handler: EventHandler): void;
+    /**
+     * Subscribe to an event and automatically remove the listener after it fires once.
+     */
+    once<K extends keyof CrafterEventMap>(event: K, handler: EventHandler<CrafterEventMap[K]>): () => void;
+    once(event: string, handler: EventHandler): () => void;
+    /**
+     * Emit an event to all subscribers.
+     */
+    emit<K extends keyof CrafterEventMap>(event: K, payload: CrafterEventMap[K]): void;
+    emit(event: string, payload?: any): void;
+    /**
+     * Remove all listeners for an event or all events.
+     */
+    removeAllListeners(event?: string): void;
+}
+
+/** Payment modülünün kullandığı yapılandırma alanları */
+type PaymentsModuleOptions = Pick<CrafterConfig, 'websiteId' | 'stripePublishableKey'>;
+/** Backend yanıtındaki Stripe Tax alanlarından tipli vergi kırılımı; `subtotal` yoksa null. */
+declare function parseTaxBreakdown(raw: Record<string, any> | null | undefined): PaymentTaxBreakdown | null;
+/**
+ * Ödeme başlatma / sepet ödeme yanıtını normalize eder (eklemeli: ham alanlar korunur).
+ * - `paymentId`: backend `payment_id` döndürür; `paymentId` yoksa doldurulur.
+ * - `tax`: Stripe Tax kırılımı (yoksa null).
+ * - `stripe`: yalnızca `type === 'stripe'` ve `clientSecret` varsa (satıcı LLC + CrafterPayments).
+ */
+declare function normalizePaymentResponse<T extends Record<string, any>>(raw: T, fallbackPublishableKey?: string | null): T & InitiatePaymentResponse;
+/** Alıcının onayladığı sözleşme sürümü / bölge eki (CrafterPayments onay kaydı, chargeback kanıtı). */
+interface LegalTermsConsent {
+    version: string;
+    region?: string;
+}
+/** Sözleşme onayı başlıkları: x-legal-terms-version / x-legal-terms-region */
+declare function legalTermsHeaders(consent?: LegalTermsConsent): Record<string, string> | undefined;
+/**
+ * Müşteri para biriminde ödeme (#424, #426): teklif alınır, ödeme `quoteId` ve teklifin para birimiyle başlatılır.
+ * Teklif süresi dolduysa / sepet değiştiyse bir kez yeni teklif alınır. Mağaza müşteri para birimini kapattıysa
+ * (`customer_currency_not_allowed`) ödeme teklifsiz, mağaza para biriminde başlatılır (`customerCurrencyDisabled`).
+ * Diğer hatalar olduğu gibi fırlatılır.
+ */
+declare function payWithQuote<T extends Record<string, any>>(getQuote: () => Promise<PresentmentQuote>, pay: (quote: PresentmentQuote | null) => Promise<T>): Promise<T & {
+    customerCurrencyDisabled: boolean;
+}>;
+/**
+ * Public durum yanıtını yorumlar. Backend'in public `delivery` özeti:
+ * pending → PENDING, delivered → DELIVERED, failed → NEEDS_REVIEW (teslim edilemedi / incelemede), refunded → REFUNDED.
+ * Backend ileride `deliveryStatus` döndürürse o kullanılır.
+ */
+declare function parsePaymentStatus(paymentId: string, raw: Record<string, any> | null | undefined): PaymentStatusResult;
+/** Formdaki en yüksek bakiye yükleme tutarı: sağlayıcı üst sınırı, tek yükleme limiti ve kalan ödenmiş bakiye hakkı. */
+declare function topUpMaxAmount(policy: BalanceTopUpPolicy | null | undefined, providerMax?: number): number;
+declare class PaymentsModule {
+    private http;
+    private events;
+    private options;
+    constructor(http: HttpClient, events: EventEmitter, options?: PaymentsModuleOptions);
+    /**
+     * Get public active payment providers and bonus multipliers.
+     * GET /config/payment/public
+     */
+    getPublicProviders(): Promise<PublicPaymentProvider[]>;
+    /**
+     * Initiate a payment session (PayTR, Shopier, KuveytTürk, CrafterPayments etc.).
+     * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi) bulunur.
+     * POST /payment/initiate
+     */
+    initiate(data: InitiatePaymentDto | (Omit<InitiatePaymentDto, 'providerId'> & {
+        provider?: string;
+        providerId?: string;
+    }), options?: {
+        legalTerms?: LegalTermsConsent;
+    } & CustomerCurrencyOptions): Promise<InitiatePaymentResponse>;
+    /**
+     * Kilitli kur teklifi (~30 dk): tutar mağaza para biriminde hesaplanır, müşterinin para birimini sunucu belirler
+     * (`currency` yalnızca öneridir). Ödeme `quoteId` ile başlatılır. Oturum gerektirir.
+     * Mağaza müşteri para birimini kapattıysa 400 `customer_currency_not_allowed`.
+     * POST /payment/quote
+     */
+    quote(data: PresentmentQuoteRequest): Promise<PresentmentQuote>;
+    /**
+     * Check payment status by payment ID.
+     * POST /payment/check
+     */
+    check(paymentId: string): Promise<CheckPaymentResponse>;
+    /**
+     * Ödeme ve teslimat durumu (oturum gerektirmez). Stripe ödemesinde webhook gecikirse backend ödemeyi Stripe'tan okur.
+     * GET /payment/status/:paymentId
+     */
+    getStatus(paymentId: string): Promise<PaymentStatusResult>;
+    /**
+     * Ödeme sonucu kesinleşene kadar `getStatus` ile yoklar (Stripe `confirmPayment` sonrası).
+     * Ödeme alındı ama teslimat sürüyorsa yoklama devam eder. Süre dolarsa son görülen durum döner.
+     * Ağ hataları yutulur, yoklama sürer.
+     */
+    waitForResult(paymentId: string, options?: WaitForPaymentOptions): Promise<PaymentStatusResult>;
+    /**
+     * Bakiye yükleme koşulları: açık mı, limitler (USD ve mağaza para birimi), ödenmiş / bonus bakiye
+     * ve koşul metninin gösterilip gösterilmeyeceği (`showTerms`). Oturum gerektirir.
+     * GET /payment/balance-top-up/policy?websiteId=
+     */
+    getTopUpPolicy(websiteId?: string): Promise<BalanceTopUpPolicy>;
+}
+
+/**
+ * Sepet deposu (#447). Bugün tarayıcıda: localStorage 'cart' ve 'crafter_cart_coupon' anahtarları, storefront
+ * checkout'unun (`src/app/checkout/cart.ts`) okuduğu biçimle aynı. Hibrit sepet (#434) gelince sunucu deposu bu
+ * arayüzü uygular; `crafter.cart` API'si değişmez (bütün metotlar zaten Promise döner).
+ */
+/** Depodaki satır: checkout'un okuduğu alanlar */
+interface StoredCartLine {
+    id: string;
+    name: string;
+    /** Birim fiyat, mağaza para biriminde (indirimsiz) */
+    price: number;
+    quantity: number;
+    discountType?: string | null;
+    discountValue?: number | null;
+    images?: string[];
+    [key: string]: unknown;
+}
+interface CartStore {
+    read(): Promise<StoredCartLine[]>;
+    write(lines: StoredCartLine[]): Promise<void>;
+    readCoupon(): Promise<string | null>;
+    writeCoupon(code: string | null): Promise<void>;
+    /** Başka sekmede ya da dışarıda değişince çağrılır; aboneliği kaldıran fonksiyon döner */
+    subscribe(onChange: () => void): () => void;
+}
+declare const CART_STORAGE_KEY = "cart";
+declare const CART_COUPON_KEY = "crafter_cart_coupon";
+/** Bozuk kayıtları ayıklar; id'siz satır atılır, miktar en az 1 tam sayı */
+declare function normalizeLines(raw: unknown): StoredCartLine[];
+declare class LocalStorageCartStore implements CartStore {
+    read(): Promise<StoredCartLine[]>;
+    write(lines: StoredCartLine[]): Promise<void>;
+    readCoupon(): Promise<string | null>;
+    writeCoupon(code: string | null): Promise<void>;
+    subscribe(onChange: () => void): () => void;
+}
+
+/**
+ * Tema olayları (#447): SDK değişiklikleri hem kendi olay yoluna (`crafter.on('cart:updated')`) hem de
+ * `document` üzerine `crafter:<ad>` CustomEvent olarak yayar. Temalar SDK örneğini beklemeden dinleyebilir:
+ *   document.addEventListener('crafter:cart:updated', (e) => e.detail.itemCount)
+ */
+declare const DOM_EVENTS: {
+    readonly ready: "crafter:ready";
+    readonly cartUpdated: "crafter:cart:updated";
+    readonly localizationChanged: "crafter:localization:changed";
+};
+type DomEventName = (typeof DOM_EVENTS)[keyof typeof DOM_EVENTS];
+/** `document` üzerine `crafter:<name>` olayı; tarayıcı dışında sessizce atlanır */
+declare function dispatchDomEvent(name: string, detail?: unknown): void;
+declare class DomEvents {
+    private events;
+    constructor(events: EventEmitter);
+    /** SDK olay yoluna ve `document`'a birlikte yayar */
+    emit(name: string, detail?: unknown): void;
+    /**
+     * `document` üzerindeki `crafter:<name>` olayını dinler; işleyici `event.detail` alır. Aboneliği kaldıran fonksiyon döner.
+     * @example crafter.dom.on('cart:updated', (cart) => badge.textContent = cart.itemCount)
+     */
+    on(name: string, handler: (detail: any) => void): () => void;
+}
+
+/** Sepete eklenecek ürün; tema genelde `data-*` özniteliklerinden verir */
+interface CartAddInput {
+    id: string | number;
+    name?: string;
+    /** Birim fiyat, mağaza para biriminde */
+    price?: number | string;
+    discountType?: string | null;
+    discountValue?: number | string | null;
+    image?: string | null;
+    images?: string[];
+}
+/** Sepet satırı: depodaki alanlar + hesaplananlar (mağaza para biriminde) */
+interface CartLine extends StoredCartLine {
+    /** İlk görsel; yoksa null */
+    image: string | null;
+    /** İndirim uygulanmış birim fiyat */
+    unitPrice: number;
+    lineTotal: number;
+}
+interface CartState {
+    items: CartLine[];
+    /** Toplam adet */
+    itemCount: number;
+    /** Ara toplam, mağaza para biriminde; gösterim için `crafter.money.format(cart.subtotal)` */
+    subtotal: number;
+    /** Mağaza para birimi (sayfa bağlamından); bilinmiyorsa boş */
+    currency: string;
+    coupon: string | null;
+}
+interface CartModuleDeps {
+    /** Sepet deposu; varsayılan localStorage ('cart'). Hibrit sepet (#434) sunucu deposu verir. */
+    store?: CartStore;
+    dom?: DomEvents;
+    storeCurrency?: () => string;
+}
+/** İndirim uygulanmış birim fiyat: 'percentage' yüzde, diğer tipler sabit tutar (checkout ile aynı kural) */
+declare function discountedUnitPrice(line: Pick<StoredCartLine, 'price' | 'discountType' | 'discountValue'>): number;
+declare class CartModule {
+    private http;
+    private events;
+    private options;
+    private payments;
+    private store;
+    private dom;
+    private storeCurrency;
+    constructor(http: HttpClient, events: EventEmitter, options?: PaymentsModuleOptions, deps?: CartModuleDeps);
+    /** Sepetin güncel hali */
+    get(): Promise<CartState>;
+    /** Ürünü ekler; sepette varsa adedi artar. `crafter:cart:updated` yayar. */
+    add(product: CartAddInput, quantity?: number): Promise<CartState>;
+    /** Satırın adedini ayarlar; 0 ya da altı satırı siler */
+    update(id: string | number, quantity: number): Promise<CartState>;
+    remove(id: string | number): Promise<CartState>;
+    /** Sepeti ve kuponu boşaltır */
+    clear(): Promise<CartState>;
+    /** Checkout'ta uygulanacak kupon kodu; null kaldırır */
+    setCoupon(code: string | null): Promise<CartState>;
+    private commit;
+    /**
+     * Complete purchase using user balance.
+     * POST /marketplace/purchase
+     */
+    purchase(data: PurchaseDto): Promise<PurchaseResponse>;
+    /**
+     * Pay the cart at a provider. The charged amount is the storefront total.
+     * Balance is not credited and the top-up multiplier is not applied.
+     * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi kırılımı) bulunur.
+     * Stok yetersizse `CrafterOutOfStockError` (HTTP 409, `productIds`) fırlatılır.
+     * Para birimini sunucu belirler; `currency` verilmezse gönderilmez. `{ useCustomerCurrency: true }` ile önce kilitli
+     * kur teklifi alınır ve ödeme müşteri para biriminde başlatılır (bkz. `payWithQuote`).
+     * POST /payment/checkout
+     */
+    checkout(data: PurchaseDto & {
+        providerId: string;
+        websiteId: string;
+        provider?: string;
+        /** Yalnızca teklifin para birimi (`quoteId` ile); verilmezse sunucu mağaza para birimini kullanır */
+        currency?: string;
+        /** Kilitli kur teklifi (`payments.quote`) */
+        quoteId?: string;
+        paymentDetails?: Record<string, any>;
+        user: {
+            name: string;
+            email: string;
+            phone?: string;
+            address?: string;
+        };
+        /** Alıcının ülkesi (ISO 3166-1 alpha-2); satıcı LLC iken Stripe Tax vergi konumu */
+        billingCountry?: string;
+        /** ABD / Kanada için posta kodu (Stripe Tax) */
+        billingPostalCode?: string;
+    }, options?: {
+        legalTerms?: LegalTermsConsent;
+    } & CustomerCurrencyOptions): Promise<CheckoutPaymentResponse>;
+    private checkoutPayload;
+}
+
+/**
+ * Sayfa bağlamı (#447): storefront her v2 tema sayfasına `content_for_header` ile
+ * `window.__CRAFTER_CONTEXT__` yazar. Gizli bilgi ve kişisel veri içermez; yalnızca mağaza, dil ve para birimi.
+ * IIFE derlemesi bu nesneyi görünce `window.Crafter` örneğini kendiliğinden kurar (bkz. `autoInit`).
+ */
+interface CrafterPageContext {
+    /** Bağlamı yazan storefront'un eklediği SDK sürümü */
+    sdkVersion?: string;
+    websiteId?: string;
+    /** Aynı kökenli proxy; varsayılan '/api/storefront' */
+    apiBase?: string;
+    /** Sayfanın dili (ör. 'en', 'pt-BR') */
+    locale?: string;
+    /** Mağazanın varsayılan dili */
+    defaultLocale?: string;
+    /** Sayfa adresinin dil öneki: varsayılan dilde '', diğerlerinde '/en' */
+    localePrefix?: string;
+    /** Mağazanın açık dilleri */
+    languages?: string[];
+    /** Mağaza para birimi (muhasebe birimi); tutarlar bu birimde tutulur */
+    storeCurrency?: string;
+    /** Müşterinin para birimi; yoksa mağaza para birimi */
+    customerCurrency?: string;
+    /** 1 mağaza birimi = rate müşteri birimi (yalnızca gösterim) */
+    rate?: number;
+    /** Seçicideki para birimleri */
+    currencies?: string[];
+    /** Platform adresleri; checkout dil önekiyle çalışmaz, dili Referer'dan okur */
+    routes?: {
+        cart?: string;
+        checkout?: string;
+        localization?: string;
+    };
+}
+declare const CONTEXT_GLOBAL = "__CRAFTER_CONTEXT__";
+/** `window.__CRAFTER_CONTEXT__` okunur; yoksa ya da nesne değilse null */
+declare function readPageContext(win?: any): CrafterPageContext | null;
+/** Dil önekini yoldan çıkarır: '/en/cart' → '/cart' (önek '/en' iken) */
+declare function stripLocalePrefix(pathname: string, prefix: string | undefined): string;
+
 interface CrafterConfig {
     /**
      * Operating mode:
@@ -40,6 +404,11 @@ interface CrafterConfig {
      * Backend ödeme yanıtında anahtar döndürürse o önceliklidir. Gizli değildir.
      */
     stripePublishableKey?: string;
+    /**
+     * Sayfa bağlamı (#447): storefront'un `window.__CRAFTER_CONTEXT__` nesnesi. Para gösterimi, dil seçimi ve
+     * checkout adresi buradan okunur. Tema sayfalarında SDK kendiliğinden verir.
+     */
+    context?: CrafterPageContext;
 }
 interface RequestOptions extends RequestInit {
     params?: Record<string, string | number | boolean | undefined>;
@@ -1040,6 +1409,14 @@ interface CrafterEventMap {
     'discord:unlinked': void;
     'cart:purchased': PurchaseResponse;
     'cart:checkout': CheckoutPaymentResponse;
+    /** Sepet değişti (ekle / güncelle / sil / başka sekme); `document`'ta `crafter:cart:updated` */
+    'cart:updated': CartState;
+    /** Dil / para birimi seçildi; `document`'ta `crafter:localization:changed` */
+    'localization:changed': {
+        language: string;
+        currency: string;
+        url: string;
+    };
     'license:verified': {
         valid: boolean;
         productId?: string;
@@ -1103,84 +1480,6 @@ interface CrafterEventMap {
     'payment:quoted': PresentmentQuote;
 }
 type CrafterEventName = keyof CrafterEventMap;
-
-declare class HttpClient {
-    readonly mode: 'storefront' | 'direct';
-    private config;
-    private token;
-    private storageKey;
-    constructor(config?: CrafterConfig);
-    /**
-     * Safe getter for stored token from localStorage
-     */
-    private readTokenFromStorage;
-    /**
-     * Get current auth token
-     */
-    getToken(): string | null;
-    /**
-     * Set or clear auth token
-     */
-    setToken(token: string | null): void;
-    /**
-     * Clear active auth token
-     */
-    clearToken(): void;
-    /**
-     * Resolves the full URL for an endpoint according to SDK operating mode:
-     *
-     * Mode 1: 'storefront' (Liquid themes)
-     * - Prepends '/api/storefront':
-     *   /v2/auth/signin      -> /api/storefront/v2/auth/signin
-     *   /products            -> /api/storefront/products
-     *
-     * Mode 2: 'direct' (Headless apps, external scripts, Node)
-     * - Prepends 'https://api.crafter.net.tr/website/{v2/}:websiteId/...':
-     *   /v2/auth/signin      -> https://api.crafter.net.tr/website/v2/:websiteId/auth/signin
-     *   /products            -> https://api.crafter.net.tr/website/:websiteId/products
-     *   /payment/initiate    -> https://api.crafter.net.tr/website/payment/initiate
-     */
-    buildUrl(path: string, options?: RequestOptions): string;
-    private appendParams;
-    /**
-     * Core request dispatcher with automatic credentials (cookies) & token header
-     */
-    request<T = any>(endpoint: string, options?: RequestOptions): Promise<T>;
-    get<T = any>(endpoint: string, options?: RequestOptions): Promise<T>;
-    post<T = any>(endpoint: string, body?: any, options?: RequestOptions): Promise<T>;
-    put<T = any>(endpoint: string, body?: any, options?: RequestOptions): Promise<T>;
-    patch<T = any>(endpoint: string, body?: any, options?: RequestOptions): Promise<T>;
-    delete<T = any>(endpoint: string, options?: RequestOptions): Promise<T>;
-}
-
-type EventHandler<T = any> = (payload: T) => void;
-declare class EventEmitter {
-    private listeners;
-    /**
-     * Subscribe to an event.
-     */
-    on<K extends keyof CrafterEventMap>(event: K, handler: EventHandler<CrafterEventMap[K]>): () => void;
-    on(event: string, handler: EventHandler): () => void;
-    /**
-     * Unsubscribe a handler from an event.
-     */
-    off<K extends keyof CrafterEventMap>(event: K, handler: EventHandler<CrafterEventMap[K]>): void;
-    off(event: string, handler: EventHandler): void;
-    /**
-     * Subscribe to an event and automatically remove the listener after it fires once.
-     */
-    once<K extends keyof CrafterEventMap>(event: K, handler: EventHandler<CrafterEventMap[K]>): () => void;
-    once(event: string, handler: EventHandler): () => void;
-    /**
-     * Emit an event to all subscribers.
-     */
-    emit<K extends keyof CrafterEventMap>(event: K, payload: CrafterEventMap[K]): void;
-    emit(event: string, payload?: any): void;
-    /**
-     * Remove all listeners for an event or all events.
-     */
-    removeAllListeners(event?: string): void;
-}
 
 declare class AuthModule {
     private http;
@@ -1493,138 +1792,6 @@ declare class StoreModule {
      * GET /config/marketplace
      */
     getConfig(): Promise<MarketplaceConfig>;
-}
-
-/** Payment modülünün kullandığı yapılandırma alanları */
-type PaymentsModuleOptions = Pick<CrafterConfig, 'websiteId' | 'stripePublishableKey'>;
-/** Backend yanıtındaki Stripe Tax alanlarından tipli vergi kırılımı; `subtotal` yoksa null. */
-declare function parseTaxBreakdown(raw: Record<string, any> | null | undefined): PaymentTaxBreakdown | null;
-/**
- * Ödeme başlatma / sepet ödeme yanıtını normalize eder (eklemeli: ham alanlar korunur).
- * - `paymentId`: backend `payment_id` döndürür; `paymentId` yoksa doldurulur.
- * - `tax`: Stripe Tax kırılımı (yoksa null).
- * - `stripe`: yalnızca `type === 'stripe'` ve `clientSecret` varsa (satıcı LLC + CrafterPayments).
- */
-declare function normalizePaymentResponse<T extends Record<string, any>>(raw: T, fallbackPublishableKey?: string | null): T & InitiatePaymentResponse;
-/** Alıcının onayladığı sözleşme sürümü / bölge eki (CrafterPayments onay kaydı, chargeback kanıtı). */
-interface LegalTermsConsent {
-    version: string;
-    region?: string;
-}
-/** Sözleşme onayı başlıkları: x-legal-terms-version / x-legal-terms-region */
-declare function legalTermsHeaders(consent?: LegalTermsConsent): Record<string, string> | undefined;
-/**
- * Müşteri para biriminde ödeme (#424, #426): teklif alınır, ödeme `quoteId` ve teklifin para birimiyle başlatılır.
- * Teklif süresi dolduysa / sepet değiştiyse bir kez yeni teklif alınır. Mağaza müşteri para birimini kapattıysa
- * (`customer_currency_not_allowed`) ödeme teklifsiz, mağaza para biriminde başlatılır (`customerCurrencyDisabled`).
- * Diğer hatalar olduğu gibi fırlatılır.
- */
-declare function payWithQuote<T extends Record<string, any>>(getQuote: () => Promise<PresentmentQuote>, pay: (quote: PresentmentQuote | null) => Promise<T>): Promise<T & {
-    customerCurrencyDisabled: boolean;
-}>;
-/**
- * Public durum yanıtını yorumlar. Backend'in public `delivery` özeti:
- * pending → PENDING, delivered → DELIVERED, failed → NEEDS_REVIEW (teslim edilemedi / incelemede), refunded → REFUNDED.
- * Backend ileride `deliveryStatus` döndürürse o kullanılır.
- */
-declare function parsePaymentStatus(paymentId: string, raw: Record<string, any> | null | undefined): PaymentStatusResult;
-/** Formdaki en yüksek bakiye yükleme tutarı: sağlayıcı üst sınırı, tek yükleme limiti ve kalan ödenmiş bakiye hakkı. */
-declare function topUpMaxAmount(policy: BalanceTopUpPolicy | null | undefined, providerMax?: number): number;
-declare class PaymentsModule {
-    private http;
-    private events;
-    private options;
-    constructor(http: HttpClient, events: EventEmitter, options?: PaymentsModuleOptions);
-    /**
-     * Get public active payment providers and bonus multipliers.
-     * GET /config/payment/public
-     */
-    getPublicProviders(): Promise<PublicPaymentProvider[]>;
-    /**
-     * Initiate a payment session (PayTR, Shopier, KuveytTürk, CrafterPayments etc.).
-     * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi) bulunur.
-     * POST /payment/initiate
-     */
-    initiate(data: InitiatePaymentDto | (Omit<InitiatePaymentDto, 'providerId'> & {
-        provider?: string;
-        providerId?: string;
-    }), options?: {
-        legalTerms?: LegalTermsConsent;
-    } & CustomerCurrencyOptions): Promise<InitiatePaymentResponse>;
-    /**
-     * Kilitli kur teklifi (~30 dk): tutar mağaza para biriminde hesaplanır, müşterinin para birimini sunucu belirler
-     * (`currency` yalnızca öneridir). Ödeme `quoteId` ile başlatılır. Oturum gerektirir.
-     * Mağaza müşteri para birimini kapattıysa 400 `customer_currency_not_allowed`.
-     * POST /payment/quote
-     */
-    quote(data: PresentmentQuoteRequest): Promise<PresentmentQuote>;
-    /**
-     * Check payment status by payment ID.
-     * POST /payment/check
-     */
-    check(paymentId: string): Promise<CheckPaymentResponse>;
-    /**
-     * Ödeme ve teslimat durumu (oturum gerektirmez). Stripe ödemesinde webhook gecikirse backend ödemeyi Stripe'tan okur.
-     * GET /payment/status/:paymentId
-     */
-    getStatus(paymentId: string): Promise<PaymentStatusResult>;
-    /**
-     * Ödeme sonucu kesinleşene kadar `getStatus` ile yoklar (Stripe `confirmPayment` sonrası).
-     * Ödeme alındı ama teslimat sürüyorsa yoklama devam eder. Süre dolarsa son görülen durum döner.
-     * Ağ hataları yutulur, yoklama sürer.
-     */
-    waitForResult(paymentId: string, options?: WaitForPaymentOptions): Promise<PaymentStatusResult>;
-    /**
-     * Bakiye yükleme koşulları: açık mı, limitler (USD ve mağaza para birimi), ödenmiş / bonus bakiye
-     * ve koşul metninin gösterilip gösterilmeyeceği (`showTerms`). Oturum gerektirir.
-     * GET /payment/balance-top-up/policy?websiteId=
-     */
-    getTopUpPolicy(websiteId?: string): Promise<BalanceTopUpPolicy>;
-}
-
-declare class CartModule {
-    private http;
-    private events;
-    private options;
-    private payments;
-    constructor(http: HttpClient, events: EventEmitter, options?: PaymentsModuleOptions);
-    /**
-     * Complete purchase using user balance.
-     * POST /marketplace/purchase
-     */
-    purchase(data: PurchaseDto): Promise<PurchaseResponse>;
-    /**
-     * Pay the cart at a provider. The charged amount is the storefront total.
-     * Balance is not credited and the top-up multiplier is not applied.
-     * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi kırılımı) bulunur.
-     * Stok yetersizse `CrafterOutOfStockError` (HTTP 409, `productIds`) fırlatılır.
-     * Para birimini sunucu belirler; `currency` verilmezse gönderilmez. `{ useCustomerCurrency: true }` ile önce kilitli
-     * kur teklifi alınır ve ödeme müşteri para biriminde başlatılır (bkz. `payWithQuote`).
-     * POST /payment/checkout
-     */
-    checkout(data: PurchaseDto & {
-        providerId: string;
-        websiteId: string;
-        provider?: string;
-        /** Yalnızca teklifin para birimi (`quoteId` ile); verilmezse sunucu mağaza para birimini kullanır */
-        currency?: string;
-        /** Kilitli kur teklifi (`payments.quote`) */
-        quoteId?: string;
-        paymentDetails?: Record<string, any>;
-        user: {
-            name: string;
-            email: string;
-            phone?: string;
-            address?: string;
-        };
-        /** Alıcının ülkesi (ISO 3166-1 alpha-2); satıcı LLC iken Stripe Tax vergi konumu */
-        billingCountry?: string;
-        /** ABD / Kanada için posta kodu (Stripe Tax) */
-        billingPostalCode?: string;
-    }, options?: {
-        legalTerms?: LegalTermsConsent;
-    } & CustomerCurrencyOptions): Promise<CheckoutPaymentResponse>;
-    private checkoutPayload;
 }
 
 declare class ChestModule {
@@ -2094,6 +2261,93 @@ declare class CurrenciesModule {
     }): Promise<CurrencyConversion>;
 }
 
+interface MoneyFormatOptions {
+    /**
+     * Tutar mağaza para birimindeyse (varsayılan) sayfa bağlamının kuruyla müşterinin para birimine çevrilir.
+     * `false`: çevrilmez, mağaza para biriminde basılır (bakiye, hakediş gibi).
+     */
+    convert?: boolean;
+    /** Tutar zaten bu para birimindeyse (ör. ödeme teklifi) verilir; çeviri yapılmaz */
+    currency?: string;
+    /** Varsayılan: sayfanın dili */
+    locale?: string;
+}
+/** Para biriminin ondalık hanesi (Intl); bilinmeyen kodda 2 */
+declare function currencyDigits(currency: string): number;
+/**
+ * Para gösterimi (#447): storefront'un `money` filtresiyle aynı kural. Tutarlar mağaza para biriminde gelir;
+ * sayfa bağlamındaki kurla müşterinin para birimine çevrilip sayfanın dilinde biçimlenir. Bağlam yoksa ya da
+ * kur geçersizse mağaza para biriminde gösterilir. Yalnızca gösterimdir; kesin tutar ödeme anında sunucuda belirlenir.
+ */
+declare class MoneyModule {
+    private getContext;
+    constructor(getContext: () => CrafterPageContext | null);
+    /** Mağaza para birimi; bağlam yoksa boş */
+    get storeCurrency(): string;
+    /** Müşterinin para birimi; kur geçersizse mağaza para birimi */
+    get currency(): string;
+    /** 1 mağaza birimi = rate müşteri birimi; müşteri para birimi mağazanınkiyse 1 */
+    get rate(): number;
+    /** Mağaza tutarını müşteri para birimine çevirir ve o birimin hanesine yuvarlar */
+    convert(storeAmount: number | string): number;
+    /**
+     * @example Crafter.money.format(19.99)                    // '€18,40' (EUR müşteri, de)
+     * @example Crafter.money.format(250, { convert: false })  // mağaza para biriminde
+     */
+    format(amount: number | string, options?: MoneyFormatOptions): string;
+    private rateOf;
+}
+
+interface LocalizationState {
+    /** Sayfanın dili */
+    language: string;
+    /** Müşterinin para birimi; yoksa mağaza para birimi */
+    currency: string;
+    languages: string[];
+    currencies: string[];
+}
+interface LocalizationChange {
+    language?: string;
+    currency?: string;
+}
+interface LocalizationSetOptions {
+    /** Seçimden sonra dönülecek uygulama içi yol (öneksiz); varsayılan bulunulan sayfa */
+    returnTo?: string;
+    /** false: sayfa yenilenmez, yalnızca adres döner (tema kendisi yönetir). Varsayılan true. */
+    reload?: boolean;
+}
+/**
+ * Dil ve para birimi (#447). Seçim storefront'un JS'siz formuyla aynı uca gider: `POST /localization`
+ * (`language`, `currency`, `return_to`). Sunucu seçimi çereze yazar ve sayfanın seçilen dildeki adresini verir.
+ */
+declare class LocalizationModule {
+    private getContext;
+    private dom;
+    constructor(getContext: () => CrafterPageContext | null, dom: DomEvents);
+    get(): LocalizationState;
+    /**
+     * Dili ve/veya para birimini değiştirir. Varsayılan olarak sayfa seçilen dildeki adrese gider.
+     * `crafter:localization:changed` olayı (`{ language, currency, url }`) gezinmeden önce yayılır.
+     */
+    set(change: LocalizationChange, options?: LocalizationSetOptions): Promise<{
+        url: string;
+    }>;
+}
+
+interface SectionsRenderOptions {
+    /** Bölümlerin render edileceği sayfa; varsayılan bulunulan sayfa (yol + sorgu) */
+    url?: string;
+    /** false: DOM'a dokunulmaz, yalnızca HTML döner */
+    swap?: boolean;
+}
+/**
+ * Bölüm render (#447): `?sections=a,b` ucundan bölümlerin güncel HTML'ini alır ve sayfadaki
+ * `#crafter-section-<id>` sarmalayıcılarını yenisiyle değiştirir. Grup bölümleri `<grup>:<id>` ile istenir.
+ */
+declare class SectionsModule {
+    render(ids: string[], options?: SectionsRenderOptions): Promise<Record<string, string | null>>;
+}
+
 /**
  * Tutarı para birimi ve dile göre biçimlendirir (Intl.NumberFormat). Sembol ve ondalık hane para biriminden gelir;
  * 'TL' / '₺' sabit yazılmaz. `locale` verilmezse çalışma ortamının dili kullanılır.
@@ -2322,10 +2576,31 @@ declare function isOutOfStockError(err: unknown): err is CrafterOutOfStockError;
 declare function isBalanceTopUpError(err: unknown): err is CrafterBalanceTopUpError;
 declare function isPaymentProviderError(err: unknown): err is CrafterPaymentProviderError;
 
+/** Paket sürümü; package.json ile aynı tutulur (test denetler) */
+declare const SDK_VERSION = "1.4.0";
+
+/** `crafter.checkout()` seçenekleri */
+interface CheckoutNavigateOptions {
+    /** 'cart' (varsayılan): sepet ödemesi; 'balance': bakiye yükleme */
+    purpose?: 'cart' | 'balance';
+    /** Bakiye yüklemede önerilen tutar (mağaza para biriminde) */
+    amount?: number;
+    /** false: gezinmez, yalnızca adresi döner */
+    navigate?: boolean;
+}
 declare class Crafter {
+    static readonly version = "1.4.0";
+    readonly version = "1.4.0";
     readonly config: CrafterConfig;
     readonly http: HttpClient;
     readonly events: EventEmitter;
+    /** `document` olayları: `crafter.dom.on('cart:updated', fn)` */
+    readonly dom: DomEvents;
+    /** Sayfa bağlamı (storefront'un yazdığı `window.__CRAFTER_CONTEXT__`); yoksa null */
+    readonly context: CrafterPageContext | null;
+    readonly money: MoneyModule;
+    readonly localization: LocalizationModule;
+    readonly sections: SectionsModule;
     readonly auth: AuthModule;
     readonly users: UsersModule;
     readonly store: StoreModule;
@@ -2393,6 +2668,17 @@ declare class Crafter {
         };
     };
     constructor(config?: CrafterConfig);
+    /**
+     * Checkout sayfasına gider (#447). Sepet için `/checkout?purpose=cart`; checkout dil önekiyle açılmaz,
+     * dili gelinen sayfadan okur. Adres sayfa bağlamından (`routes.checkout`) gelir.
+     */
+    checkout(options?: CheckoutNavigateOptions): string;
+    /**
+     * Tarayıcı derlemesinin (IIFE) otomatik başlatması (#447). Sayfada `window.__CRAFTER_CONTEXT__` varsa
+     * `window.Crafter` bu bağlamla kurulmuş örnek olur ve `document`'a `crafter:ready` yayılır; yoksa null döner
+     * (`window.Crafter` sınıf olarak kalır, `new Crafter({...})` eskisi gibi çalışır). İkinci çağrı aynı örneği döner.
+     */
+    static autoInit(win?: any): Crafter | null;
     on<K extends keyof CrafterEventMap>(event: K, handler: EventHandler<CrafterEventMap[K]>): () => void;
     on(event: string, handler: EventHandler): () => void;
     off<K extends keyof CrafterEventMap>(event: K, handler: EventHandler<CrafterEventMap[K]>): void;
@@ -2405,4 +2691,4 @@ declare class Crafter {
 
 // @ts-ignore
 export = Crafter;
-export { type Auth2FaRequiredResponse, type AuthEmailVerificationRequiredResponse, AuthModule, type AuthResponse, type AuthSuccessResponse, type BalanceTopUpLimits, type BalanceTopUpPolicy, type BulkDiscountConfig, CartModule, type Category, type ChangePasswordDto, type CheckPaymentResponse, type CheckoutPaymentResponse, type ChestItem, ChestModule, type ChestProductSummary, type CouponResponse, CouponsModule, Crafter, type CrafterApiError, CrafterBalanceTopUpError, type CrafterConfig, CrafterError, type CrafterEventMap, type CrafterEventName, CrafterOutOfStockError, CrafterPaymentProviderError, type CreateReportDto, type CreateTicketDto, CurrenciesModule, type CurrencyConversion, type CustomerCurrencyContext, type CustomerCurrencyMode, type CustomerCurrencyOptions, type CustomerCurrencySource, type DisableTwoFactorDto, type DiscordStatusData, type DiscordStatusResponse, EventEmitter, type EventHandler, type ForumCategory, type ForumMessage, type ForumMessageReply, ForumModule, type ForumTopic, type GiftChestItemResponse, type HelpArticleItem, type HelpCategoryItem, type HelpFaqItem, type HelpcenterCategoryDetailResponse, HelpcenterModule, type HelpcenterOverviewResponse, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, type InGameAuthDto, type InitiatePaymentDto, type InitiatePaymentResponse, type InitiatePaymentUser, type LatestPayment, type LatestPurchase, type LatestSignup, type LegalDocuments, LegalModule, type LegalTermsConsent, type LexicalHtmlOptions, type LicenseRecord, type LicenseVerification, LicensesModule, type LightweightBalanceResponse, type LikePostResponse, type LikeTopicResponse, LuckPermsModule, type LuckPermsPermissionNode, type LuckPermsPlayerData, type MarketplaceConfig, type PageItem, PagesModule, type PaginatedPostsResponse, type PaginatedPunishmentsResponse, type PaymentDeliveryStatus, PaymentErrorType, type PaymentErrorTypeValue, type PaymentOutcome, type PaymentPresentment, type PaymentRecordStatus, type PaymentSessionType, type PaymentStatusResult, type PaymentTaxBreakdown, type PaymentTaxLine, PaymentsModule, type PaymentsModuleOptions, type PostAuthor, type PostItem, type PostQueryDto, PostsModule, type PresentmentQuote, type PresentmentQuoteKind, type PresentmentQuoteRequest, type Product, type PublicDeliveryState, type PublicPaymentProvider, type PunishmentItem, PunishmentsModule, type PurchaseDto, type PurchaseItemDto, type PurchaseResponse, RedeemCodeModule, type ReplyTicketDto, type ReportResponse, type ReportType, ReportsModule, type RequestOptions, type ResetPasswordDto, SearchModule, type SearchResultItem, type SendBalanceParams, type SendBalanceResponse, SeoModule, type SerializedCodeNode, type SerializedEditorState, type SerializedElementNode, type SerializedHeadingNode, type SerializedHorizontalRuleNode, type SerializedImageNode, type SerializedLexicalNode, type SerializedLinkNode, type SerializedListItemNode, type SerializedListNode, type SerializedQuoteNode, type SerializedRootNode, type SerializedTableCellNode, type SerializedTableNode, type SerializedTableRowNode, type SerializedTextNode, type ServerStatusItem, ServersModule, type SignInDto, type SignUpDto, type SinglePostResponse, type SiteStatistics, type SitemapUrlItem, type StaffFormApplicationResponse, type StaffFormApplicationValue, type StaffFormInput, type StaffFormItem, StaffFormsModule, StatisticsModule, StoreModule, type StripePaymentSession, type Ticket, type TicketCategory, type TicketCategoryDetails, type TicketMessage, type TicketMessageSender, TicketsModule, type TopCreditLoader, type TwoFactorStatusResponse, type TwoFactorValidateDto, type UpdateOwnUserDto, type UseChestItemResponse, type UseRedeemCodeResponse, type UserProfile, type UserRole, UsersModule, VoteModule, type VoteProcessResponse, type VoteProviderItem, type WaitForPaymentOptions, type WallMessage, type WallMessageReply, type WebsiteInfo, WebsiteModule, type WebsitePluginModule, type WebsiteSeoConfig, formatMoney, htmlToLexical, isBalanceTopUpError, isCrafterError, isLexicalFormat, isOutOfStockError, isPaymentProviderError, legalTermsHeaders, lexicalToHtml, lexicalToPlainText, lexicalToText, normalizePaymentResponse, parsePaymentStatus, parseTaxBreakdown, payWithQuote, toLexical, topUpMaxAmount };
+export { type Auth2FaRequiredResponse, type AuthEmailVerificationRequiredResponse, AuthModule, type AuthResponse, type AuthSuccessResponse, type BalanceTopUpLimits, type BalanceTopUpPolicy, type BulkDiscountConfig, CART_COUPON_KEY, CART_STORAGE_KEY, CONTEXT_GLOBAL, type CartAddInput, type CartLine, CartModule, type CartModuleDeps, type CartState, type CartStore, type Category, type ChangePasswordDto, type CheckPaymentResponse, type CheckoutNavigateOptions, type CheckoutPaymentResponse, type ChestItem, ChestModule, type ChestProductSummary, type CouponResponse, CouponsModule, Crafter, type CrafterApiError, CrafterBalanceTopUpError, type CrafterConfig, CrafterError, type CrafterEventMap, type CrafterEventName, CrafterOutOfStockError, type CrafterPageContext, CrafterPaymentProviderError, type CreateReportDto, type CreateTicketDto, CurrenciesModule, type CurrencyConversion, type CustomerCurrencyContext, type CustomerCurrencyMode, type CustomerCurrencyOptions, type CustomerCurrencySource, DOM_EVENTS, type DisableTwoFactorDto, type DiscordStatusData, type DiscordStatusResponse, type DomEventName, DomEvents, EventEmitter, type EventHandler, type ForumCategory, type ForumMessage, type ForumMessageReply, ForumModule, type ForumTopic, type GiftChestItemResponse, type HelpArticleItem, type HelpCategoryItem, type HelpFaqItem, type HelpcenterCategoryDetailResponse, HelpcenterModule, type HelpcenterOverviewResponse, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, type InGameAuthDto, type InitiatePaymentDto, type InitiatePaymentResponse, type InitiatePaymentUser, type LatestPayment, type LatestPurchase, type LatestSignup, type LegalDocuments, LegalModule, type LegalTermsConsent, type LexicalHtmlOptions, type LicenseRecord, type LicenseVerification, LicensesModule, type LightweightBalanceResponse, type LikePostResponse, type LikeTopicResponse, LocalStorageCartStore, type LocalizationChange, LocalizationModule, type LocalizationSetOptions, type LocalizationState, LuckPermsModule, type LuckPermsPermissionNode, type LuckPermsPlayerData, type MarketplaceConfig, type MoneyFormatOptions, MoneyModule, type PageItem, PagesModule, type PaginatedPostsResponse, type PaginatedPunishmentsResponse, type PaymentDeliveryStatus, PaymentErrorType, type PaymentErrorTypeValue, type PaymentOutcome, type PaymentPresentment, type PaymentRecordStatus, type PaymentSessionType, type PaymentStatusResult, type PaymentTaxBreakdown, type PaymentTaxLine, PaymentsModule, type PaymentsModuleOptions, type PostAuthor, type PostItem, type PostQueryDto, PostsModule, type PresentmentQuote, type PresentmentQuoteKind, type PresentmentQuoteRequest, type Product, type PublicDeliveryState, type PublicPaymentProvider, type PunishmentItem, PunishmentsModule, type PurchaseDto, type PurchaseItemDto, type PurchaseResponse, RedeemCodeModule, type ReplyTicketDto, type ReportResponse, type ReportType, ReportsModule, type RequestOptions, type ResetPasswordDto, SDK_VERSION, SearchModule, type SearchResultItem, SectionsModule, type SectionsRenderOptions, type SendBalanceParams, type SendBalanceResponse, SeoModule, type SerializedCodeNode, type SerializedEditorState, type SerializedElementNode, type SerializedHeadingNode, type SerializedHorizontalRuleNode, type SerializedImageNode, type SerializedLexicalNode, type SerializedLinkNode, type SerializedListItemNode, type SerializedListNode, type SerializedQuoteNode, type SerializedRootNode, type SerializedTableCellNode, type SerializedTableNode, type SerializedTableRowNode, type SerializedTextNode, type ServerStatusItem, ServersModule, type SignInDto, type SignUpDto, type SinglePostResponse, type SiteStatistics, type SitemapUrlItem, type StaffFormApplicationResponse, type StaffFormApplicationValue, type StaffFormInput, type StaffFormItem, StaffFormsModule, StatisticsModule, StoreModule, type StoredCartLine, type StripePaymentSession, type Ticket, type TicketCategory, type TicketCategoryDetails, type TicketMessage, type TicketMessageSender, TicketsModule, type TopCreditLoader, type TwoFactorStatusResponse, type TwoFactorValidateDto, type UpdateOwnUserDto, type UseChestItemResponse, type UseRedeemCodeResponse, type UserProfile, type UserRole, UsersModule, VoteModule, type VoteProcessResponse, type VoteProviderItem, type WaitForPaymentOptions, type WallMessage, type WallMessageReply, type WebsiteInfo, WebsiteModule, type WebsitePluginModule, type WebsiteSeoConfig, currencyDigits, discountedUnitPrice, dispatchDomEvent, formatMoney, htmlToLexical, isBalanceTopUpError, isCrafterError, isLexicalFormat, isOutOfStockError, isPaymentProviderError, legalTermsHeaders, lexicalToHtml, lexicalToPlainText, lexicalToText, normalizeLines, normalizePaymentResponse, parsePaymentStatus, parseTaxBreakdown, payWithQuote, readPageContext, stripLocalePrefix, toLexical, topUpMaxAmount };
