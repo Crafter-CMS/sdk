@@ -28,6 +28,7 @@ Son ödemeleri, son mağaza satın alımlarını, son kayıt olan oyuncuları ve
 * **Örnek Kullanım:**
   ```javascript
   const stats = await crafter.statistics.get(5);
+  const { currency } = await crafter.website.getInfo(); // tutarlar mağaza para biriminde
 
   // 1. Son Satın Alımlar Akışı
   stats.latest.purchases.forEach(p => {
@@ -36,7 +37,7 @@ Son ödemeleri, son mağaza satın alımlarını, son kayıt olan oyuncuları ve
 
   // 2. Lider Tablosu (En Çok Kredi Yükleyenler)
   stats.topCreditLoaders.forEach((loader, index) => {
-    console.log(`#${index + 1} - ${loader.username}: ${loader.totalAmount} TL`);
+    console.log(`#${index + 1} - ${loader.username}: ${Crafter.utils.formatMoney(loader.totalAmount, currency)}`);
   });
 
   // 3. Toplam Oyuncu Sayısı

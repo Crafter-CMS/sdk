@@ -26,6 +26,8 @@ import { SeoModule } from './modules/seo';
 import { LuckPermsModule } from './modules/luckperms';
 import { WebsiteModule } from './modules/website';
 import { LicensesModule } from './modules/licenses';
+import { CurrenciesModule } from './modules/currencies';
+import { formatMoney } from './utils/money';
 import {
   lexicalToHtml,
   lexicalToText,
@@ -75,6 +77,7 @@ export class Crafter {
   public readonly luckperms: LuckPermsModule;
   public readonly website: WebsiteModule;
   public readonly licenses: LicensesModule;
+  public readonly currencies: CurrenciesModule;
 
   public readonly utils = {
     lexicalToHtml,
@@ -83,6 +86,7 @@ export class Crafter {
     toLexical,
     htmlToLexical,
     isLexicalFormat,
+    formatMoney,
     formats: {
       IS_BOLD,
       IS_ITALIC,
@@ -102,6 +106,7 @@ export class Crafter {
     toLexical,
     htmlToLexical,
     isLexicalFormat,
+    formatMoney,
     formats: {
       IS_BOLD,
       IS_ITALIC,
@@ -156,6 +161,7 @@ export class Crafter {
     this.luckperms = new LuckPermsModule(this.http, this.events);
     this.website = new WebsiteModule(this.http, this.events);
     this.licenses = new LicensesModule(this.http, this.events);
+    this.currencies = new CurrenciesModule(this.http, this.events, this.config);
   }
 
   // ===================== Event Shorthands =====================
@@ -216,4 +222,6 @@ export * from './modules/seo';
 export * from './modules/luckperms';
 export * from './modules/website';
 export * from './modules/licenses';
+export * from './modules/currencies';
+export * from './utils/money';
 export * from './utils/lexical';

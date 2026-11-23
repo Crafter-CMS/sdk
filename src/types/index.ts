@@ -555,7 +555,13 @@ export interface InitiatePaymentUser {
 export interface InitiatePaymentDto {
   amount: number;
   providerId: string;
+  /**
+   * Para birimini sunucu belirler (mağaza para birimi). Yalnızca kilitli teklifin (`quoteId`) para birimi
+   * gönderilebilir; başka bir değer 400 `payment_currency_mismatch` döner. Verilmezse alan gönderilmez.
+   */
   currency?: string;
+  /** Kilitli kur teklifi (`payments.quote`); verilmezse ödeme mağaza para biriminde */
+  quoteId?: string;
   websiteId?: string;
   user: InitiatePaymentUser;
   /** Alıcının ülkesi (ISO 3166-1 alpha-2); satıcı LLC iken Stripe Tax vergi konumu */
@@ -610,6 +616,105 @@ export interface StripePaymentSession {
   merchantOid?: string;
   /** Stripe Tax kırılımı; backend vergi bilgisi döndürmediyse null */
   tax: PaymentTaxBreakdown | null;
+  /** Müşteri para biriminde ödemede mağaza tutarı ve kur; mağaza para biriminde ödemede yok */
+  presentment?: PaymentPresentment;
+}
+
+/** Kur teklifi türü: sepet ödemesi ya da bakiye yükleme */
+export type PresentmentQuoteKind = 'cart' | 'top_up';
+
+/** `POST /payment/quote` gövdesi */
+export interface PresentmentQuoteRequest {
+  /** Verilmezse `CrafterConfig.websiteId` */
+  websiteId?: string;
+  kind: PresentmentQuoteKind;
+  /** Müşterinin seçtiği para birimi (öneri); sunucu ayara ve ülkeye göre belirler */
+  currency?: string;
+  /** kind = top_up: yükleme tutarı (mağaza para biriminde) */
+  amount?: number;
+  /** kind = cart: `cart.checkout` ile aynı sepet alanları */
+  coupon?: string;
+  productIds?: string[];
+  items?: { productId: string; quantity: number }[];
+  quantities?: Record<string, number>;
+}
+
+/** Kilitli kur teklifi (~30 dk geçerli); ödeme `quoteId` ile başlatılır */
+export interface PresentmentQuote {
+  quoteId: string;
+  kind: PresentmentQuoteKind;
+  storeCurrency: string;
+  storeAmount: number;
+  /** Müşterinin ödeyeceği para birimi ve tutar */
+  currency: string;
+  amount: number;
+  /** 1 mağaza birimi = rate müşteri birimi (kur payı dahil) */
+  rate: number;
+  baseRate?: number;
+  markupPercent?: number;
+  rateDate?: string;
+  rateSource?: string;
+  /** ISO tarih */
+  expiresAt: string;
+}
+
+/** Ödeme yanıtındaki müşteri para birimi bilgisi (teklifle ödemede) */
+export interface PaymentPresentment {
+  quoteId: string;
+  currency: string;
+  amount: number;
+  rate: number;
+  rateDate?: string;
+  storeCurrency: string;
+  storeAmount: number;
+}
+
+/** Müşteri para biriminin ayarı: otomatik, seçili para birimleri ya da kapalı */
+export type CustomerCurrencyMode = 'auto' | 'selected' | 'off' | (string & {});
+
+/** Müşteri para birimi nasıl belirlendi: seçim (çerez / parametre), ülke ya da mağaza para birimi */
+export type CustomerCurrencySource = 'choice' | 'country' | 'store' | (string & {});
+
+/** `GET /payment/currencies`: fiyat gösterimi ve para birimi seçicisi için bağlam */
+export interface CustomerCurrencyContext {
+  storeCurrency: string;
+  mode: CustomerCurrencyMode;
+  /** Mağaza para biriminden başka para birimi gösterilebiliyor mu */
+  enabled: boolean;
+  /** Seçicideki para birimleri; mağaza para birimi ilk sırada */
+  currencies: string[];
+  /** Müşterinin para birimi */
+  currency: string;
+  source: CustomerCurrencySource;
+  /** 1 mağaza birimi = rate müşteri birimi (kur payı dahil) */
+  rate: number;
+  /** İzinli para birimlerinin kurları (seçicide anında çeviri için) */
+  rates: Record<string, number>;
+  markupPercent: number;
+  rateDate: string | null;
+  rateSource: string | null;
+}
+
+/** `POST /payment/currencies/convert`: tutarlar istek sırasıyla müşteri para biriminde */
+export interface CurrencyConversion {
+  storeCurrency: string;
+  currency: string;
+  source: CustomerCurrencySource;
+  rate: number;
+  rateDate: string | null;
+  rateSource: string | null;
+  amounts: number[];
+}
+
+/**
+ * Müşteri para biriminde ödeme (isteğe bağlı): önce kilitli teklif alınır, ödeme `quoteId` ile başlatılır.
+ * Teklifin süresi dolduysa / sepet değiştiyse bir kez yeni teklif alınır; mağaza müşteri para birimini
+ * kapattıysa (`customer_currency_not_allowed`) ödeme mağaza para biriminde başlatılır.
+ */
+export interface CustomerCurrencyOptions {
+  useCustomerCurrency?: boolean;
+  /** Teklif için para birimi önerisi; verilmezse sunucu çerezden / ülkeden belirler */
+  customerCurrency?: string;
 }
 
 export interface InitiatePaymentResponse {
@@ -641,6 +746,13 @@ export interface InitiatePaymentResponse {
   stripe?: StripePaymentSession;
   /** SDK tarafından eklenir: vergi kırılımı (yoksa null) */
   tax?: PaymentTaxBreakdown | null;
+  /**
+   * Teklifle (müşteri para biriminde) ödemede mağaza tutarı ve kur. Bu durumda `amount`, `currency`, `subtotal`,
+   * `taxAmount` ve `taxes` müşteri para birimindedir.
+   */
+  presentment?: PaymentPresentment;
+  /** SDK tarafından eklenir (`useCustomerCurrency`): müşteri para birimi kapalı, ödeme mağaza para biriminde */
+  customerCurrencyDisabled?: boolean;
   [key: string]: any;
 }
 
@@ -1091,6 +1203,7 @@ export interface CrafterEventMap {
   'payment:initiated': InitiatePaymentResponse;
   'payment:checked': CheckPaymentResponse;
   'payment:status': PaymentStatusResult;
+  'payment:quoted': PresentmentQuote;
 }
 
 export type CrafterEventName = keyof CrafterEventMap;

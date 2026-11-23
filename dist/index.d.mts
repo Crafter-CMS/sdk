@@ -484,7 +484,13 @@ interface InitiatePaymentUser {
 interface InitiatePaymentDto {
     amount: number;
     providerId: string;
+    /**
+     * Para birimini sunucu belirler (mağaza para birimi). Yalnızca kilitli teklifin (`quoteId`) para birimi
+     * gönderilebilir; başka bir değer 400 `payment_currency_mismatch` döner. Verilmezse alan gönderilmez.
+     */
     currency?: string;
+    /** Kilitli kur teklifi (`payments.quote`); verilmezse ödeme mağaza para biriminde */
+    quoteId?: string;
     websiteId?: string;
     user: InitiatePaymentUser;
     /** Alıcının ülkesi (ISO 3166-1 alpha-2); satıcı LLC iken Stripe Tax vergi konumu */
@@ -535,6 +541,99 @@ interface StripePaymentSession {
     merchantOid?: string;
     /** Stripe Tax kırılımı; backend vergi bilgisi döndürmediyse null */
     tax: PaymentTaxBreakdown | null;
+    /** Müşteri para biriminde ödemede mağaza tutarı ve kur; mağaza para biriminde ödemede yok */
+    presentment?: PaymentPresentment;
+}
+/** Kur teklifi türü: sepet ödemesi ya da bakiye yükleme */
+type PresentmentQuoteKind = 'cart' | 'top_up';
+/** `POST /payment/quote` gövdesi */
+interface PresentmentQuoteRequest {
+    /** Verilmezse `CrafterConfig.websiteId` */
+    websiteId?: string;
+    kind: PresentmentQuoteKind;
+    /** Müşterinin seçtiği para birimi (öneri); sunucu ayara ve ülkeye göre belirler */
+    currency?: string;
+    /** kind = top_up: yükleme tutarı (mağaza para biriminde) */
+    amount?: number;
+    /** kind = cart: `cart.checkout` ile aynı sepet alanları */
+    coupon?: string;
+    productIds?: string[];
+    items?: {
+        productId: string;
+        quantity: number;
+    }[];
+    quantities?: Record<string, number>;
+}
+/** Kilitli kur teklifi (~30 dk geçerli); ödeme `quoteId` ile başlatılır */
+interface PresentmentQuote {
+    quoteId: string;
+    kind: PresentmentQuoteKind;
+    storeCurrency: string;
+    storeAmount: number;
+    /** Müşterinin ödeyeceği para birimi ve tutar */
+    currency: string;
+    amount: number;
+    /** 1 mağaza birimi = rate müşteri birimi (kur payı dahil) */
+    rate: number;
+    baseRate?: number;
+    markupPercent?: number;
+    rateDate?: string;
+    rateSource?: string;
+    /** ISO tarih */
+    expiresAt: string;
+}
+/** Ödeme yanıtındaki müşteri para birimi bilgisi (teklifle ödemede) */
+interface PaymentPresentment {
+    quoteId: string;
+    currency: string;
+    amount: number;
+    rate: number;
+    rateDate?: string;
+    storeCurrency: string;
+    storeAmount: number;
+}
+/** Müşteri para biriminin ayarı: otomatik, seçili para birimleri ya da kapalı */
+type CustomerCurrencyMode = 'auto' | 'selected' | 'off' | (string & {});
+/** Müşteri para birimi nasıl belirlendi: seçim (çerez / parametre), ülke ya da mağaza para birimi */
+type CustomerCurrencySource = 'choice' | 'country' | 'store' | (string & {});
+/** `GET /payment/currencies`: fiyat gösterimi ve para birimi seçicisi için bağlam */
+interface CustomerCurrencyContext {
+    storeCurrency: string;
+    mode: CustomerCurrencyMode;
+    /** Mağaza para biriminden başka para birimi gösterilebiliyor mu */
+    enabled: boolean;
+    /** Seçicideki para birimleri; mağaza para birimi ilk sırada */
+    currencies: string[];
+    /** Müşterinin para birimi */
+    currency: string;
+    source: CustomerCurrencySource;
+    /** 1 mağaza birimi = rate müşteri birimi (kur payı dahil) */
+    rate: number;
+    /** İzinli para birimlerinin kurları (seçicide anında çeviri için) */
+    rates: Record<string, number>;
+    markupPercent: number;
+    rateDate: string | null;
+    rateSource: string | null;
+}
+/** `POST /payment/currencies/convert`: tutarlar istek sırasıyla müşteri para biriminde */
+interface CurrencyConversion {
+    storeCurrency: string;
+    currency: string;
+    source: CustomerCurrencySource;
+    rate: number;
+    rateDate: string | null;
+    rateSource: string | null;
+    amounts: number[];
+}
+/**
+ * Müşteri para biriminde ödeme (isteğe bağlı): önce kilitli teklif alınır, ödeme `quoteId` ile başlatılır.
+ * Teklifin süresi dolduysa / sepet değiştiyse bir kez yeni teklif alınır; mağaza müşteri para birimini
+ * kapattıysa (`customer_currency_not_allowed`) ödeme mağaza para biriminde başlatılır.
+ */
+interface CustomerCurrencyOptions {
+    useCustomerCurrency?: boolean;
+    /** Teklif için para birimi önerisi; verilmezse sunucu çerezden / ülkeden belirler */
+    customerCurrency?: string;
 }
 interface InitiatePaymentResponse {
     token?: string;
@@ -565,6 +664,13 @@ interface InitiatePaymentResponse {
     stripe?: StripePaymentSession;
     /** SDK tarafından eklenir: vergi kırılımı (yoksa null) */
     tax?: PaymentTaxBreakdown | null;
+    /**
+     * Teklifle (müşteri para biriminde) ödemede mağaza tutarı ve kur. Bu durumda `amount`, `currency`, `subtotal`,
+     * `taxAmount` ve `taxes` müşteri para birimindedir.
+     */
+    presentment?: PaymentPresentment;
+    /** SDK tarafından eklenir (`useCustomerCurrency`): müşteri para birimi kapalı, ödeme mağaza para biriminde */
+    customerCurrencyDisabled?: boolean;
     [key: string]: any;
 }
 /** Sepet ödemesi (`cart.checkout`) yanıtı; ödeme başlatma yanıtıyla aynı yapıdadır. */
@@ -994,6 +1100,7 @@ interface CrafterEventMap {
     'payment:initiated': InitiatePaymentResponse;
     'payment:checked': CheckPaymentResponse;
     'payment:status': PaymentStatusResult;
+    'payment:quoted': PresentmentQuote;
 }
 type CrafterEventName = keyof CrafterEventMap;
 
@@ -1407,6 +1514,15 @@ interface LegalTermsConsent {
 /** Sözleşme onayı başlıkları: x-legal-terms-version / x-legal-terms-region */
 declare function legalTermsHeaders(consent?: LegalTermsConsent): Record<string, string> | undefined;
 /**
+ * Müşteri para biriminde ödeme (#424, #426): teklif alınır, ödeme `quoteId` ve teklifin para birimiyle başlatılır.
+ * Teklif süresi dolduysa / sepet değiştiyse bir kez yeni teklif alınır. Mağaza müşteri para birimini kapattıysa
+ * (`customer_currency_not_allowed`) ödeme teklifsiz, mağaza para biriminde başlatılır (`customerCurrencyDisabled`).
+ * Diğer hatalar olduğu gibi fırlatılır.
+ */
+declare function payWithQuote<T extends Record<string, any>>(getQuote: () => Promise<PresentmentQuote>, pay: (quote: PresentmentQuote | null) => Promise<T>): Promise<T & {
+    customerCurrencyDisabled: boolean;
+}>;
+/**
  * Public durum yanıtını yorumlar. Backend'in public `delivery` özeti:
  * pending → PENDING, delivered → DELIVERED, failed → NEEDS_REVIEW (teslim edilemedi / incelemede), refunded → REFUNDED.
  * Backend ileride `deliveryStatus` döndürürse o kullanılır.
@@ -1434,7 +1550,14 @@ declare class PaymentsModule {
         providerId?: string;
     }), options?: {
         legalTerms?: LegalTermsConsent;
-    }): Promise<InitiatePaymentResponse>;
+    } & CustomerCurrencyOptions): Promise<InitiatePaymentResponse>;
+    /**
+     * Kilitli kur teklifi (~30 dk): tutar mağaza para biriminde hesaplanır, müşterinin para birimini sunucu belirler
+     * (`currency` yalnızca öneridir). Ödeme `quoteId` ile başlatılır. Oturum gerektirir.
+     * Mağaza müşteri para birimini kapattıysa 400 `customer_currency_not_allowed`.
+     * POST /payment/quote
+     */
+    quote(data: PresentmentQuoteRequest): Promise<PresentmentQuote>;
     /**
      * Check payment status by payment ID.
      * POST /payment/check
@@ -1463,6 +1586,7 @@ declare class CartModule {
     private http;
     private events;
     private options;
+    private payments;
     constructor(http: HttpClient, events: EventEmitter, options?: PaymentsModuleOptions);
     /**
      * Complete purchase using user balance.
@@ -1474,13 +1598,18 @@ declare class CartModule {
      * Balance is not credited and the top-up multiplier is not applied.
      * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi kırılımı) bulunur.
      * Stok yetersizse `CrafterOutOfStockError` (HTTP 409, `productIds`) fırlatılır.
+     * Para birimini sunucu belirler; `currency` verilmezse gönderilmez. `{ useCustomerCurrency: true }` ile önce kilitli
+     * kur teklifi alınır ve ödeme müşteri para biriminde başlatılır (bkz. `payWithQuote`).
      * POST /payment/checkout
      */
     checkout(data: PurchaseDto & {
         providerId: string;
         websiteId: string;
         provider?: string;
+        /** Yalnızca teklifin para birimi (`quoteId` ile); verilmezse sunucu mağaza para birimini kullanır */
         currency?: string;
+        /** Kilitli kur teklifi (`payments.quote`) */
+        quoteId?: string;
         paymentDetails?: Record<string, any>;
         user: {
             name: string;
@@ -1494,7 +1623,8 @@ declare class CartModule {
         billingPostalCode?: string;
     }, options?: {
         legalTerms?: LegalTermsConsent;
-    }): Promise<CheckoutPaymentResponse>;
+    } & CustomerCurrencyOptions): Promise<CheckoutPaymentResponse>;
+    private checkoutPayload;
 }
 
 declare class ChestModule {
@@ -1936,6 +2066,45 @@ declare class LicensesModule {
 }
 
 /**
+ * Müşteri para birimi (#424, #426): fiyat gösterimi için bağlam ve çeviri. Para birimini sunucu belirler
+ * (vitrinin `crafter_currency` çerezi, ülke, mağaza para birimi); SDK kendi çerezini yazmaz.
+ * Çevrilen tutarlar yalnızca gösterim içindir; ödeme tutarı kilitli teklifle (`payments.quote`) belirlenir.
+ */
+declare class CurrenciesModule {
+    private http;
+    private events;
+    private options;
+    constructor(http: HttpClient, events: EventEmitter, options?: Pick<CrafterConfig, 'websiteId'>);
+    /**
+     * Mağaza para birimi, izinli para birimleri, müşterinin para birimi ve kurlar.
+     * `currency`: müşterinin seçimi (öneri); izinli değilse ülke / mağaza para birimi döner.
+     * GET /payment/currencies?websiteId=&currency=
+     */
+    context(params?: {
+        currency?: string;
+        websiteId?: string;
+    }): Promise<CustomerCurrencyContext>;
+    /**
+     * Mağaza para birimindeki tutarları (en fazla 500) müşteri para birimine çevirir; sıra korunur.
+     * POST /payment/currencies/convert
+     */
+    convert(amounts: number[], params?: {
+        currency?: string;
+        websiteId?: string;
+    }): Promise<CurrencyConversion>;
+}
+
+/**
+ * Tutarı para birimi ve dile göre biçimlendirir (Intl.NumberFormat). Sembol ve ondalık hane para biriminden gelir;
+ * 'TL' / '₺' sabit yazılmaz. `locale` verilmezse çalışma ortamının dili kullanılır.
+ * Geçersiz para birimi / dil kodunda `1234.50 XYZ` biçimine düşer (hata fırlatmaz).
+ *
+ * @example formatMoney(9.99, 'USD', 'en-US') // '$9.99'
+ * @example formatMoney(250, 'TRY', 'tr-TR')  // '₺250,00'
+ */
+declare function formatMoney(amount: number | string, currency: string, locale?: string | string[]): string;
+
+/**
  * Official Lexical Format Bitmask Flags
  * @see https://lexical.dev/docs/concepts/nodes
  */
@@ -2105,6 +2274,16 @@ declare const PaymentErrorType: {
     readonly PAYMENT_CONFIG_ERROR: "payment_config_error";
     readonly PAYMENT_INITIALIZATION_FAILED: "payment_initialization_failed";
     readonly PAYMENT_FAILED: "payment_failed";
+    /** İstemcinin gönderdiği para birimi mağazanınkinden (ya da teklifinkinden) farklı */
+    readonly PAYMENT_CURRENCY_MISMATCH: "payment_currency_mismatch";
+    /** Sağlayıcı / satıcı bu para birimini desteklemiyor */
+    readonly PAYMENT_CURRENCY_UNSUPPORTED: "payment_currency_unsupported";
+    /** Mağaza müşteri para birimini kapattı: ödeme mağaza para biriminde */
+    readonly CUSTOMER_CURRENCY_NOT_ALLOWED: "customer_currency_not_allowed";
+    /** Teklif bulunamadı / süresi doldu / sepet değişti: yeni teklif alınır */
+    readonly PRESENTMENT_QUOTE_NOT_FOUND: "presentment_quote_not_found";
+    readonly PRESENTMENT_QUOTE_EXPIRED: "presentment_quote_expired";
+    readonly PRESENTMENT_QUOTE_MISMATCH: "presentment_quote_mismatch";
 };
 type PaymentErrorTypeValue = (typeof PaymentErrorType)[keyof typeof PaymentErrorType];
 type ErrorPayload = ConstructorParameters<typeof CrafterError>[0];
@@ -2174,6 +2353,7 @@ declare class Crafter {
     readonly luckperms: LuckPermsModule;
     readonly website: WebsiteModule;
     readonly licenses: LicensesModule;
+    readonly currencies: CurrenciesModule;
     readonly utils: {
         lexicalToHtml: typeof lexicalToHtml;
         lexicalToText: typeof lexicalToText;
@@ -2181,6 +2361,7 @@ declare class Crafter {
         toLexical: typeof toLexical;
         htmlToLexical: typeof htmlToLexical;
         isLexicalFormat: typeof isLexicalFormat;
+        formatMoney: typeof formatMoney;
         formats: {
             IS_BOLD: number;
             IS_ITALIC: number;
@@ -2199,6 +2380,7 @@ declare class Crafter {
         toLexical: typeof toLexical;
         htmlToLexical: typeof htmlToLexical;
         isLexicalFormat: typeof isLexicalFormat;
+        formatMoney: typeof formatMoney;
         formats: {
             IS_BOLD: number;
             IS_ITALIC: number;
@@ -2221,4 +2403,4 @@ declare class Crafter {
     emit(event: string, payload?: any): void;
 }
 
-export { type Auth2FaRequiredResponse, type AuthEmailVerificationRequiredResponse, AuthModule, type AuthResponse, type AuthSuccessResponse, type BalanceTopUpLimits, type BalanceTopUpPolicy, type BulkDiscountConfig, CartModule, type Category, type ChangePasswordDto, type CheckPaymentResponse, type CheckoutPaymentResponse, type ChestItem, ChestModule, type ChestProductSummary, type CouponResponse, CouponsModule, Crafter, type CrafterApiError, CrafterBalanceTopUpError, type CrafterConfig, CrafterError, type CrafterEventMap, type CrafterEventName, CrafterOutOfStockError, CrafterPaymentProviderError, type CreateReportDto, type CreateTicketDto, type DisableTwoFactorDto, type DiscordStatusData, type DiscordStatusResponse, EventEmitter, type EventHandler, type ForumCategory, type ForumMessage, type ForumMessageReply, ForumModule, type ForumTopic, type GiftChestItemResponse, type HelpArticleItem, type HelpCategoryItem, type HelpFaqItem, type HelpcenterCategoryDetailResponse, HelpcenterModule, type HelpcenterOverviewResponse, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, type InGameAuthDto, type InitiatePaymentDto, type InitiatePaymentResponse, type InitiatePaymentUser, type LatestPayment, type LatestPurchase, type LatestSignup, type LegalDocuments, LegalModule, type LegalTermsConsent, type LexicalHtmlOptions, type LicenseRecord, type LicenseVerification, LicensesModule, type LightweightBalanceResponse, type LikePostResponse, type LikeTopicResponse, LuckPermsModule, type LuckPermsPermissionNode, type LuckPermsPlayerData, type MarketplaceConfig, type PageItem, PagesModule, type PaginatedPostsResponse, type PaginatedPunishmentsResponse, type PaymentDeliveryStatus, PaymentErrorType, type PaymentErrorTypeValue, type PaymentOutcome, type PaymentRecordStatus, type PaymentSessionType, type PaymentStatusResult, type PaymentTaxBreakdown, type PaymentTaxLine, PaymentsModule, type PaymentsModuleOptions, type PostAuthor, type PostItem, type PostQueryDto, PostsModule, type Product, type PublicDeliveryState, type PublicPaymentProvider, type PunishmentItem, PunishmentsModule, type PurchaseDto, type PurchaseItemDto, type PurchaseResponse, RedeemCodeModule, type ReplyTicketDto, type ReportResponse, type ReportType, ReportsModule, type RequestOptions, type ResetPasswordDto, SearchModule, type SearchResultItem, type SendBalanceParams, type SendBalanceResponse, SeoModule, type SerializedCodeNode, type SerializedEditorState, type SerializedElementNode, type SerializedHeadingNode, type SerializedHorizontalRuleNode, type SerializedImageNode, type SerializedLexicalNode, type SerializedLinkNode, type SerializedListItemNode, type SerializedListNode, type SerializedQuoteNode, type SerializedRootNode, type SerializedTableCellNode, type SerializedTableNode, type SerializedTableRowNode, type SerializedTextNode, type ServerStatusItem, ServersModule, type SignInDto, type SignUpDto, type SinglePostResponse, type SiteStatistics, type SitemapUrlItem, type StaffFormApplicationResponse, type StaffFormApplicationValue, type StaffFormInput, type StaffFormItem, StaffFormsModule, StatisticsModule, StoreModule, type StripePaymentSession, type Ticket, type TicketCategory, type TicketCategoryDetails, type TicketMessage, type TicketMessageSender, TicketsModule, type TopCreditLoader, type TwoFactorStatusResponse, type TwoFactorValidateDto, type UpdateOwnUserDto, type UseChestItemResponse, type UseRedeemCodeResponse, type UserProfile, type UserRole, UsersModule, VoteModule, type VoteProcessResponse, type VoteProviderItem, type WaitForPaymentOptions, type WallMessage, type WallMessageReply, type WebsiteInfo, WebsiteModule, type WebsitePluginModule, type WebsiteSeoConfig, Crafter as default, htmlToLexical, isBalanceTopUpError, isCrafterError, isLexicalFormat, isOutOfStockError, isPaymentProviderError, legalTermsHeaders, lexicalToHtml, lexicalToPlainText, lexicalToText, normalizePaymentResponse, parsePaymentStatus, parseTaxBreakdown, toLexical, topUpMaxAmount };
+export { type Auth2FaRequiredResponse, type AuthEmailVerificationRequiredResponse, AuthModule, type AuthResponse, type AuthSuccessResponse, type BalanceTopUpLimits, type BalanceTopUpPolicy, type BulkDiscountConfig, CartModule, type Category, type ChangePasswordDto, type CheckPaymentResponse, type CheckoutPaymentResponse, type ChestItem, ChestModule, type ChestProductSummary, type CouponResponse, CouponsModule, Crafter, type CrafterApiError, CrafterBalanceTopUpError, type CrafterConfig, CrafterError, type CrafterEventMap, type CrafterEventName, CrafterOutOfStockError, CrafterPaymentProviderError, type CreateReportDto, type CreateTicketDto, CurrenciesModule, type CurrencyConversion, type CustomerCurrencyContext, type CustomerCurrencyMode, type CustomerCurrencyOptions, type CustomerCurrencySource, type DisableTwoFactorDto, type DiscordStatusData, type DiscordStatusResponse, EventEmitter, type EventHandler, type ForumCategory, type ForumMessage, type ForumMessageReply, ForumModule, type ForumTopic, type GiftChestItemResponse, type HelpArticleItem, type HelpCategoryItem, type HelpFaqItem, type HelpcenterCategoryDetailResponse, HelpcenterModule, type HelpcenterOverviewResponse, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, type InGameAuthDto, type InitiatePaymentDto, type InitiatePaymentResponse, type InitiatePaymentUser, type LatestPayment, type LatestPurchase, type LatestSignup, type LegalDocuments, LegalModule, type LegalTermsConsent, type LexicalHtmlOptions, type LicenseRecord, type LicenseVerification, LicensesModule, type LightweightBalanceResponse, type LikePostResponse, type LikeTopicResponse, LuckPermsModule, type LuckPermsPermissionNode, type LuckPermsPlayerData, type MarketplaceConfig, type PageItem, PagesModule, type PaginatedPostsResponse, type PaginatedPunishmentsResponse, type PaymentDeliveryStatus, PaymentErrorType, type PaymentErrorTypeValue, type PaymentOutcome, type PaymentPresentment, type PaymentRecordStatus, type PaymentSessionType, type PaymentStatusResult, type PaymentTaxBreakdown, type PaymentTaxLine, PaymentsModule, type PaymentsModuleOptions, type PostAuthor, type PostItem, type PostQueryDto, PostsModule, type PresentmentQuote, type PresentmentQuoteKind, type PresentmentQuoteRequest, type Product, type PublicDeliveryState, type PublicPaymentProvider, type PunishmentItem, PunishmentsModule, type PurchaseDto, type PurchaseItemDto, type PurchaseResponse, RedeemCodeModule, type ReplyTicketDto, type ReportResponse, type ReportType, ReportsModule, type RequestOptions, type ResetPasswordDto, SearchModule, type SearchResultItem, type SendBalanceParams, type SendBalanceResponse, SeoModule, type SerializedCodeNode, type SerializedEditorState, type SerializedElementNode, type SerializedHeadingNode, type SerializedHorizontalRuleNode, type SerializedImageNode, type SerializedLexicalNode, type SerializedLinkNode, type SerializedListItemNode, type SerializedListNode, type SerializedQuoteNode, type SerializedRootNode, type SerializedTableCellNode, type SerializedTableNode, type SerializedTableRowNode, type SerializedTextNode, type ServerStatusItem, ServersModule, type SignInDto, type SignUpDto, type SinglePostResponse, type SiteStatistics, type SitemapUrlItem, type StaffFormApplicationResponse, type StaffFormApplicationValue, type StaffFormInput, type StaffFormItem, StaffFormsModule, StatisticsModule, StoreModule, type StripePaymentSession, type Ticket, type TicketCategory, type TicketCategoryDetails, type TicketMessage, type TicketMessageSender, TicketsModule, type TopCreditLoader, type TwoFactorStatusResponse, type TwoFactorValidateDto, type UpdateOwnUserDto, type UseChestItemResponse, type UseRedeemCodeResponse, type UserProfile, type UserRole, UsersModule, VoteModule, type VoteProcessResponse, type VoteProviderItem, type WaitForPaymentOptions, type WallMessage, type WallMessageReply, type WebsiteInfo, WebsiteModule, type WebsitePluginModule, type WebsiteSeoConfig, Crafter as default, formatMoney, htmlToLexical, isBalanceTopUpError, isCrafterError, isLexicalFormat, isOutOfStockError, isPaymentProviderError, legalTermsHeaders, lexicalToHtml, lexicalToPlainText, lexicalToText, normalizePaymentResponse, parsePaymentStatus, parseTaxBreakdown, payWithQuote, toLexical, topUpMaxAmount };

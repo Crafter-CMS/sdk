@@ -25,12 +25,13 @@ Kullanıcının sepet sayfasında girdiği indirim kuponunun geçerli olup olmad
 * **Örnek Kullanım:**
   ```javascript
   try {
+    const { currency } = await crafter.website.getInfo(); // mağaza para birimi
     const coupon = await crafter.coupons.get('BAHAR2026');
     if (coupon.isActive) {
       if (coupon.discountType === 'percentage') {
         console.log(`%${coupon.discountValue} İndirim Uygulandı!`);
       } else {
-        console.log(`${coupon.discountValue} TL İndirim Uygulandı!`);
+        console.log(`${Crafter.utils.formatMoney(coupon.discountValue, currency)} İndirim Uygulandı!`);
       }
     }
   } catch (err) {
@@ -64,7 +65,8 @@ Yöneticilerin çekilişlerde veya YouTube sponsorluklarında dağıttığı tek
   try {
     const res = await crafter.redeemCode.use('YOUTUBE-BONUS-100');
     if (res.bonus) {
-      alert(`Tebrikler! Hesabınıza ${res.bonus} TL bakiye yüklendi.`);
+      const { currency } = await crafter.website.getInfo(); // bakiye mağaza para biriminde
+      alert(`Tebrikler! Hesabınıza ${Crafter.utils.formatMoney(res.bonus, currency)} bakiye yüklendi.`);
     }
     if (res.products?.length) {
       alert(`Tebrikler! ${res.products.map(p => p.name).join(', ')} sandığınıza eklendi.`);

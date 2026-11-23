@@ -74,6 +74,16 @@ export const PaymentErrorType = {
   PAYMENT_CONFIG_ERROR: 'payment_config_error',
   PAYMENT_INITIALIZATION_FAILED: 'payment_initialization_failed',
   PAYMENT_FAILED: 'payment_failed',
+  /** İstemcinin gönderdiği para birimi mağazanınkinden (ya da teklifinkinden) farklı */
+  PAYMENT_CURRENCY_MISMATCH: 'payment_currency_mismatch',
+  /** Sağlayıcı / satıcı bu para birimini desteklemiyor */
+  PAYMENT_CURRENCY_UNSUPPORTED: 'payment_currency_unsupported',
+  /** Mağaza müşteri para birimini kapattı: ödeme mağaza para biriminde */
+  CUSTOMER_CURRENCY_NOT_ALLOWED: 'customer_currency_not_allowed',
+  /** Teklif bulunamadı / süresi doldu / sepet değişti: yeni teklif alınır */
+  PRESENTMENT_QUOTE_NOT_FOUND: 'presentment_quote_not_found',
+  PRESENTMENT_QUOTE_EXPIRED: 'presentment_quote_expired',
+  PRESENTMENT_QUOTE_MISMATCH: 'presentment_quote_mismatch',
 } as const;
 
 export type PaymentErrorTypeValue = (typeof PaymentErrorType)[keyof typeof PaymentErrorType];
@@ -87,6 +97,7 @@ const PAYMENT_PROVIDER_ERROR_TYPES: string[] = [
   PaymentErrorType.PAYMENT_CONFIG_ERROR,
   PaymentErrorType.PAYMENT_INITIALIZATION_FAILED,
   PaymentErrorType.PAYMENT_FAILED,
+  PaymentErrorType.PAYMENT_CURRENCY_UNSUPPORTED,
 ];
 
 type ErrorPayload = ConstructorParameters<typeof CrafterError>[0];

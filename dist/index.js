@@ -59,7 +59,17 @@ var PaymentErrorType = {
   PAYMENT_PROVIDER_UNSUPPORTED: "payment_provider_unsupported",
   PAYMENT_CONFIG_ERROR: "payment_config_error",
   PAYMENT_INITIALIZATION_FAILED: "payment_initialization_failed",
-  PAYMENT_FAILED: "payment_failed"
+  PAYMENT_FAILED: "payment_failed",
+  /** İstemcinin gönderdiği para birimi mağazanınkinden (ya da teklifinkinden) farklı */
+  PAYMENT_CURRENCY_MISMATCH: "payment_currency_mismatch",
+  /** Sağlayıcı / satıcı bu para birimini desteklemiyor */
+  PAYMENT_CURRENCY_UNSUPPORTED: "payment_currency_unsupported",
+  /** Mağaza müşteri para birimini kapattı: ödeme mağaza para biriminde */
+  CUSTOMER_CURRENCY_NOT_ALLOWED: "customer_currency_not_allowed",
+  /** Teklif bulunamadı / süresi doldu / sepet değişti: yeni teklif alınır */
+  PRESENTMENT_QUOTE_NOT_FOUND: "presentment_quote_not_found",
+  PRESENTMENT_QUOTE_EXPIRED: "presentment_quote_expired",
+  PRESENTMENT_QUOTE_MISMATCH: "presentment_quote_mismatch"
 };
 var PAYMENT_PROVIDER_ERROR_TYPES = [
   PaymentErrorType.SELLER_ENTITY_NOT_READY,
@@ -69,7 +79,8 @@ var PAYMENT_PROVIDER_ERROR_TYPES = [
   PaymentErrorType.PAYMENT_PROVIDER_UNSUPPORTED,
   PaymentErrorType.PAYMENT_CONFIG_ERROR,
   PaymentErrorType.PAYMENT_INITIALIZATION_FAILED,
-  PaymentErrorType.PAYMENT_FAILED
+  PaymentErrorType.PAYMENT_FAILED,
+  PaymentErrorType.PAYMENT_CURRENCY_UNSUPPORTED
 ];
 var CrafterOutOfStockError = class extends CrafterError {
   /** Tükenen ürünlerin kimlikleri (`details.productIds`); backend göndermediyse boş */
@@ -909,6 +920,7 @@ function normalizePaymentResponse(raw, fallbackPublishableKey) {
       tax
     };
     if (raw.merchant_oid) session.merchantOid = String(raw.merchant_oid);
+    if (raw.presentment && typeof raw.presentment === "object") session.presentment = raw.presentment;
     result.stripe = session;
   }
   return result;
@@ -918,6 +930,32 @@ function legalTermsHeaders(consent) {
   const headers = { "x-legal-terms-version": consent.version };
   if (consent.region) headers["x-legal-terms-region"] = consent.region;
   return headers;
+}
+var QUOTE_RETRY_ERRORS = [
+  PaymentErrorType.PRESENTMENT_QUOTE_EXPIRED,
+  PaymentErrorType.PRESENTMENT_QUOTE_MISMATCH,
+  PaymentErrorType.PRESENTMENT_QUOTE_NOT_FOUND
+];
+var errorType = (err) => isCrafterError(err) ? err.type : void 0;
+async function payWithQuote(getQuote, pay) {
+  const inStoreCurrency = async () => ({ ...await pay(null), customerCurrencyDisabled: true });
+  for (let attempt = 0; ; attempt++) {
+    let quote;
+    try {
+      quote = await getQuote();
+    } catch (err) {
+      if (errorType(err) === PaymentErrorType.CUSTOMER_CURRENCY_NOT_ALLOWED) return inStoreCurrency();
+      throw err;
+    }
+    try {
+      return { ...await pay(quote), customerCurrencyDisabled: false };
+    } catch (err) {
+      const type = errorType(err);
+      if (type === PaymentErrorType.CUSTOMER_CURRENCY_NOT_ALLOWED) return inStoreCurrency();
+      if (attempt === 0 && type && QUOTE_RETRY_ERRORS.includes(type)) continue;
+      throw err;
+    }
+  }
 }
 var DELIVERY_STATES = ["pending", "delivered", "failed", "refunded"];
 var DELIVERY_STATUSES = ["PENDING", "DELIVERED", "NEEDS_REVIEW", "REFUNDED"];
@@ -990,16 +1028,49 @@ var PaymentsModule = class {
    * POST /payment/initiate
    */
   async initiate(data, options = {}) {
-    const payload = {
-      ...data,
-      providerId: data.providerId || data.provider
+    const send = async (quote) => {
+      const payload = {
+        ...data,
+        providerId: data.providerId || data.provider
+      };
+      if (quote) {
+        payload.quoteId = quote.quoteId;
+        payload.currency = quote.currency;
+      } else if (options.useCustomerCurrency) {
+        delete payload.quoteId;
+        delete payload.currency;
+      }
+      const raw = await this.http.post("/payment/initiate", payload, {
+        headers: legalTermsHeaders(options.legalTerms)
+      });
+      return normalizePaymentResponse(raw, this.options.stripePublishableKey);
     };
-    const raw = await this.http.post("/payment/initiate", payload, {
-      headers: legalTermsHeaders(options.legalTerms)
-    });
-    const response = normalizePaymentResponse(raw, this.options.stripePublishableKey);
+    const response = options.useCustomerCurrency ? await payWithQuote(
+      () => this.quote({
+        websiteId: data.websiteId,
+        kind: "top_up",
+        amount: data.amount,
+        currency: options.customerCurrency
+      }),
+      send
+    ) : await send(null);
     this.events.emit("payment:initiated", response);
     return response;
+  }
+  /**
+   * Kilitli kur teklifi (~30 dk): tutar mağaza para biriminde hesaplanır, müşterinin para birimini sunucu belirler
+   * (`currency` yalnızca öneridir). Ödeme `quoteId` ile başlatılır. Oturum gerektirir.
+   * Mağaza müşteri para birimini kapattıysa 400 `customer_currency_not_allowed`.
+   * POST /payment/quote
+   */
+  async quote(data) {
+    const payload = { ...data };
+    const websiteId = data.websiteId || this.options.websiteId;
+    if (websiteId) payload.websiteId = websiteId;
+    for (const key of Object.keys(payload)) if (payload[key] === void 0) delete payload[key];
+    const quote = await this.http.post("/payment/quote", payload);
+    this.events.emit("payment:quoted", quote);
+    return quote;
   }
   /**
    * Check payment status by payment ID.
@@ -1081,10 +1152,12 @@ var CartModule = class {
     this.http = http;
     this.events = events;
     this.options = options;
+    this.payments = new PaymentsModule(http, events, options);
   }
   http;
   events;
   options;
+  payments;
   /**
    * Complete purchase using user balance.
    * POST /marketplace/purchase
@@ -1105,16 +1178,50 @@ var CartModule = class {
    * Balance is not credited and the top-up multiplier is not applied.
    * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi kırılımı) bulunur.
    * Stok yetersizse `CrafterOutOfStockError` (HTTP 409, `productIds`) fırlatılır.
+   * Para birimini sunucu belirler; `currency` verilmezse gönderilmez. `{ useCustomerCurrency: true }` ile önce kilitli
+   * kur teklifi alınır ve ödeme müşteri para biriminde başlatılır (bkz. `payWithQuote`).
    * POST /payment/checkout
    */
   async checkout(data, options = {}) {
+    const coupon = data.coupon || data.couponCode || void 0;
+    const send = async (quote) => {
+      const payload = this.checkoutPayload(data, coupon);
+      if (quote) {
+        payload.quoteId = quote.quoteId;
+        payload.currency = quote.currency;
+      } else if (options.useCustomerCurrency) {
+        delete payload.quoteId;
+        delete payload.currency;
+      }
+      const raw = await this.http.post("/payment/checkout", payload, {
+        headers: legalTermsHeaders(options.legalTerms)
+      });
+      return normalizePaymentResponse(raw, this.options.stripePublishableKey);
+    };
+    const response = options.useCustomerCurrency ? await payWithQuote(
+      () => this.payments.quote({
+        websiteId: data.websiteId,
+        kind: "cart",
+        currency: options.customerCurrency,
+        coupon,
+        productIds: data.productIds,
+        items: data.items,
+        quantities: data.quantities
+      }),
+      send
+    ) : await send(null);
+    this.events.emit("cart:checkout", response);
+    return response;
+  }
+  checkoutPayload(data, coupon) {
     const payload = {
       providerId: data.providerId,
       websiteId: data.websiteId,
-      currency: data.currency || "TRY",
-      coupon: data.coupon || data.couponCode || void 0,
+      coupon,
       user: data.user
     };
+    if (data.currency) payload.currency = data.currency;
+    if (data.quoteId) payload.quoteId = data.quoteId;
     if (data.provider !== void 0) payload.provider = data.provider;
     if (data.paymentDetails !== void 0) payload.paymentDetails = data.paymentDetails;
     if (data.productIds !== void 0) payload.productIds = data.productIds;
@@ -1122,12 +1229,7 @@ var CartModule = class {
     if (data.quantities !== void 0) payload.quantities = data.quantities;
     if (data.billingCountry !== void 0) payload.billingCountry = data.billingCountry;
     if (data.billingPostalCode !== void 0) payload.billingPostalCode = data.billingPostalCode;
-    const raw = await this.http.post("/payment/checkout", payload, {
-      headers: legalTermsHeaders(options.legalTerms)
-    });
-    const response = normalizePaymentResponse(raw, this.options.stripePublishableKey);
-    this.events.emit("cart:checkout", response);
-    return response;
+    return payload;
   }
 };
 
@@ -2388,6 +2490,49 @@ var LicensesModule = class {
   }
 };
 
+// src/modules/currencies.ts
+var CurrenciesModule = class {
+  constructor(http, events, options = {}) {
+    this.http = http;
+    this.events = events;
+    this.options = options;
+  }
+  http;
+  events;
+  options;
+  /**
+   * Mağaza para birimi, izinli para birimleri, müşterinin para birimi ve kurlar.
+   * `currency`: müşterinin seçimi (öneri); izinli değilse ülke / mağaza para birimi döner.
+   * GET /payment/currencies?websiteId=&currency=
+   */
+  async context(params = {}) {
+    return this.http.get("/payment/currencies", {
+      params: { websiteId: params.websiteId || this.options.websiteId, currency: params.currency }
+    });
+  }
+  /**
+   * Mağaza para birimindeki tutarları (en fazla 500) müşteri para birimine çevirir; sıra korunur.
+   * POST /payment/currencies/convert
+   */
+  async convert(amounts, params = {}) {
+    const payload = { websiteId: params.websiteId || this.options.websiteId, amounts };
+    if (params.currency) payload.currency = params.currency;
+    return this.http.post("/payment/currencies/convert", payload);
+  }
+};
+
+// src/utils/money.ts
+function formatMoney(amount, currency, locale) {
+  const value = typeof amount === "number" ? amount : Number(amount);
+  const n = Number.isFinite(value) ? value : 0;
+  const code = String(currency || "").trim().toUpperCase();
+  try {
+    return new Intl.NumberFormat(locale, { style: "currency", currency: code }).format(n);
+  } catch {
+    return code ? `${n.toFixed(2)} ${code}` : n.toFixed(2);
+  }
+}
+
 // src/index.ts
 var Crafter = class {
   config;
@@ -2420,6 +2565,7 @@ var Crafter = class {
   luckperms;
   website;
   licenses;
+  currencies;
   utils = {
     lexicalToHtml,
     lexicalToText,
@@ -2427,6 +2573,7 @@ var Crafter = class {
     toLexical,
     htmlToLexical,
     isLexicalFormat,
+    formatMoney,
     formats: {
       IS_BOLD,
       IS_ITALIC,
@@ -2445,6 +2592,7 @@ var Crafter = class {
     toLexical,
     htmlToLexical,
     isLexicalFormat,
+    formatMoney,
     formats: {
       IS_BOLD,
       IS_ITALIC,
@@ -2492,6 +2640,7 @@ var Crafter = class {
     this.luckperms = new LuckPermsModule(this.http, this.events);
     this.website = new WebsiteModule(this.http, this.events);
     this.licenses = new LicensesModule(this.http, this.events);
+    this.currencies = new CurrenciesModule(this.http, this.events, this.config);
   }
   on(event, handler) {
     return this.events.on(event, handler);
@@ -2517,6 +2666,7 @@ exports.CrafterBalanceTopUpError = CrafterBalanceTopUpError;
 exports.CrafterError = CrafterError;
 exports.CrafterOutOfStockError = CrafterOutOfStockError;
 exports.CrafterPaymentProviderError = CrafterPaymentProviderError;
+exports.CurrenciesModule = CurrenciesModule;
 exports.EventEmitter = EventEmitter;
 exports.ForumModule = ForumModule;
 exports.HelpcenterModule = HelpcenterModule;
@@ -2550,6 +2700,7 @@ exports.UsersModule = UsersModule;
 exports.VoteModule = VoteModule;
 exports.WebsiteModule = WebsiteModule;
 exports.default = index_default;
+exports.formatMoney = formatMoney;
 exports.htmlToLexical = htmlToLexical;
 exports.isBalanceTopUpError = isBalanceTopUpError;
 exports.isCrafterError = isCrafterError;
@@ -2563,6 +2714,7 @@ exports.lexicalToText = lexicalToText;
 exports.normalizePaymentResponse = normalizePaymentResponse;
 exports.parsePaymentStatus = parsePaymentStatus;
 exports.parseTaxBreakdown = parseTaxBreakdown;
+exports.payWithQuote = payWithQuote;
 exports.toLexical = toLexical;
 exports.topUpMaxAmount = topUpMaxAmount;
 //# sourceMappingURL=index.js.map
