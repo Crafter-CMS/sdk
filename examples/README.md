@@ -12,12 +12,13 @@ Bu dizin, `@crafter-cms/sdk` kütüphanesinin hem Liquid temalarında (Storefron
 | [**`02-headless-node.ts`**](./02-headless-node.ts) | **Headless (Node.js / TypeScript)** | Doğrudan API modu (`mode: 'direct'`), site bilgisi, ürün katalogları, LuckPerms oyun içi rank sorgulama, SEO sitemap ve `CrafterError` hata yönetimi. |
 | [**`03-lexical-showcase.html`**](./03-lexical-showcase.html) | **Tarayıcı / Lexical Test Alanı** | Lexical AST'yi tüm düğümleriyle (başlıklar, kontrol listeleri, tablolar, kod blokları, 8 bitmask formatı) HTML'e çevirme ve `htmlToLexical` çift yönlü dönüştürücü. |
 | [**`04-tickets-and-forum.ts`**](./04-tickets-and-forum.ts) | **TypeScript / API Entegrasyonu** | Destek talebi açma/yanıtlama/kapatma, forum konusu oluşturma ve mesajlaşma (otomatik Lexical zengin metin dönüşümü). |
+| [**`05-llc-checkout.html`**](./05-llc-checkout.html) | **Storefront (Liquid / HTML / JS)** | Satıcı LLC sepet ödemesi: CrafterPayments + Stripe Payment Element (Stripe.js tema tarafından yüklenir), Stripe Tax vergi kırılımı, `OUT_OF_STOCK` hatası, 3DS dönüşü ve teslimat durumu yoklaması. Stripe test kartı: `4242 4242 4242 4242`. |
 
 ---
 
 ## 🚀 Örnekleri İnceleme ve Çalıştırma
 
-### 1. HTML / Liquid Arayüz Örneklerini Açma (`01` ve `03`):
+### 1. HTML / Liquid Arayüz Örneklerini Açma (`01`, `03` ve `05`):
 Tarayıcınızda doğrudan çift tıklayarak veya yerel bir sunucuyla açabilirsiniz:
 ```bash
 # Örnek: VS Code Live Server veya npx serve ile

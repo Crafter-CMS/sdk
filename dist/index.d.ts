@@ -35,6 +35,11 @@ interface CrafterConfig {
      * Callback fired when token is updated or cleared.
      */
     onTokenChange?: (token: string | null) => void;
+    /**
+     * Stripe publishable key (pk_test_... / pk_live_...). Satıcı LLC iken Payment Element için kullanılır.
+     * Backend ödeme yanıtında anahtar döndürürse o önceliklidir. Gizli değildir.
+     */
+    stripePublishableKey?: string;
 }
 interface RequestOptions extends RequestInit {
     params?: Record<string, string | number | boolean | undefined>;
@@ -44,6 +49,8 @@ interface CrafterApiError {
     statusCode: number;
     message: string | string[];
     error?: string;
+    /** Backend hata kodu (ErrorType), ör. 'out_of_stock' */
+    type?: string;
     details?: Record<string, any>;
 }
 interface SignInDto {
@@ -480,14 +487,140 @@ interface InitiatePaymentDto {
     currency?: string;
     websiteId?: string;
     user: InitiatePaymentUser;
+    /** Alıcının ülkesi (ISO 3166-1 alpha-2); satıcı LLC iken Stripe Tax vergi konumu */
+    billingCountry?: string;
+    /** ABD / Kanada için posta kodu (Stripe Tax) */
+    billingPostalCode?: string;
     [key: string]: any;
+}
+/** Backend'in ödeme başlatma yanıt türü. `stripe`: satıcı LLC + CrafterPayments (Payment Element). */
+type PaymentSessionType = 'iframe' | 'redirect' | 'kuveytturk_init' | 'stripe' | (string & {});
+/** Stripe Tax vergi satırı (ülke / eyalet, vergi türü, oran ve tutar). */
+interface PaymentTaxLine {
+    country: string | null;
+    state: string | null;
+    /** 'vat' | 'sales_tax' | 'gst' | 'hst' | 'pst' | 'qst' ... */
+    taxType: string | null;
+    /** Yüzde olarak oran (ör. 19 = %19) */
+    rate: number;
+    amount: number;
+}
+/** Vergi kırılımı ve toplam (yalnızca backend `subtotal` döndürdüğünde, yani Stripe Tax hesaplandığında). */
+interface PaymentTaxBreakdown {
+    /** Vergi hariç tutar */
+    subtotal: number;
+    /** Toplam vergi */
+    taxAmount: number;
+    /** Tahsil edilecek toplam (vergi dahil) */
+    total: number;
+    currency: string;
+    lines: PaymentTaxLine[];
+}
+/**
+ * Satıcı LLC iken CrafterPayments ödemesi: Stripe Payment Element ile sayfa içinde tamamlanır.
+ * Stripe.js SDK'ya gömülü değildir; tema geliştiricisi kendisi yükler (bkz. wiki/07-payments.md).
+ */
+interface StripePaymentSession {
+    paymentId: string;
+    /** PaymentIntent client secret'ı: `stripe.elements({ clientSecret })` */
+    clientSecret: string;
+    /**
+     * Stripe publishable key. Backend yanıtında varsa oradan, yoksa `CrafterConfig.stripePublishableKey`'den gelir.
+     * İkisi de yoksa null'dır (tema kendi anahtarını kullanmalı).
+     */
+    publishableKey: string | null;
+    /** Tahsil edilecek toplam (vergi dahil) */
+    amount: number;
+    currency: string;
+    merchantOid?: string;
+    /** Stripe Tax kırılımı; backend vergi bilgisi döndürmediyse null */
+    tax: PaymentTaxBreakdown | null;
 }
 interface InitiatePaymentResponse {
     token?: string;
     iframeUrl?: string;
     paymentId?: string;
     paymentUrl?: string;
+    success?: boolean;
+    type?: PaymentSessionType;
+    /** Backend'in ham alanı; SDK ayrıca `paymentId` olarak da döndürür */
+    payment_id?: string;
+    payment_url?: string;
+    redirectUrl?: string;
+    iframeHtml?: string;
+    /** type = kuveytturk_init: 3D formu */
+    html?: string;
+    merchant_oid?: string;
+    amount?: number | string;
+    currency?: string;
+    /** type = stripe: PaymentIntent client secret'ı */
+    clientSecret?: string;
+    /** type = stripe: vergi hariç tutar, toplam vergi ve satırlar (ham alanlar) */
+    subtotal?: number;
+    taxAmount?: number;
+    taxes?: PaymentTaxLine[];
+    /** Sepet bakiyeyle tamamen ödendiyse ürünler teslim edilmiştir; sağlayıcıya gidilmez */
+    delivered?: boolean;
+    /** SDK tarafından eklenir: type = stripe ise Payment Element için gereken her şey, değilse yok */
+    stripe?: StripePaymentSession;
+    /** SDK tarafından eklenir: vergi kırılımı (yoksa null) */
+    tax?: PaymentTaxBreakdown | null;
     [key: string]: any;
+}
+/** Sepet ödemesi (`cart.checkout`) yanıtı; ödeme başlatma yanıtıyla aynı yapıdadır. */
+type CheckoutPaymentResponse = InitiatePaymentResponse;
+/** Backend ödeme kaydı durumu (public durum ucu). */
+type PaymentRecordStatus = 'PENDING' | 'COMPLETED' | 'FAILED' | 'CANCELED' | 'REFUNDED' | (string & {});
+/** Public durum ucunun döndürdüğü teslimat özeti; eski backend veya teslimatsız ödemede null. */
+type PublicDeliveryState = 'pending' | 'delivered' | 'failed' | 'refunded' | null;
+/**
+ * Teslimat durumu (backend `deliveryStatus` değerleriyle aynı adlar).
+ * - NEEDS_REVIEW: ödeme alındı ama teslimat yapılamadı / incelemede; mağaza yetkilisi müdahale etmeli.
+ * - REFUNDED: ürün tükendiği için teslim edilemedi ve ödeme otomatik iade edildi.
+ */
+type PaymentDeliveryStatus = 'PENDING' | 'DELIVERED' | 'NEEDS_REVIEW' | 'REFUNDED';
+/** Ödeme sonrası alıcıya gösterilecek sonuç. */
+type PaymentOutcome = 'processing' | 'success' | 'pending' | 'failed' | 'refunded' | 'needs_review';
+interface PaymentStatusResult {
+    paymentId: string;
+    status: PaymentRecordStatus;
+    /** Backend'in ham teslimat özeti */
+    delivery: PublicDeliveryState;
+    /** Teslimat durumu; teslimat bilgisi yoksa null */
+    deliveryStatus: PaymentDeliveryStatus | null;
+    /** Ödeme + teslimat birleşik sonucu */
+    outcome: PaymentOutcome;
+    /** Sonuç kesinleşti mi (yoklama durdurulabilir) */
+    final: boolean;
+}
+interface WaitForPaymentOptions {
+    /** Deneme sayısı (varsayılan 20) */
+    attempts?: number;
+    /** Denemeler arası bekleme, ms (varsayılan 1500) */
+    intervalMs?: number;
+    signal?: AbortSignal;
+}
+/** Site bakiyesi yükleme koşulları: `GET /payment/balance-top-up/policy` */
+interface BalanceTopUpPolicy {
+    /** Bakiye yükleme açık mı */
+    enabled: boolean;
+    /** Satıcı LLC: kapalı devre bakiye kuralları ve limitler geçerli */
+    closedLoop: boolean;
+    /** SDK tarafından eklenir: yükleme ekranında bakiye koşul metni gösterilmeli mi (closedLoop ile aynı) */
+    showTerms: boolean;
+    /** Mağaza para birimi */
+    currency: string;
+    /** Tek yüklemede en fazla (USD) */
+    maxSingleUsd: number;
+    /** Mağaza başına ödenmiş bakiye üst sınırı (USD) */
+    maxPaidUsd: number;
+    /** Mağaza para birimi karşılıkları; kur yoksa veya TR modunda null */
+    maxSingleAmount: number | null;
+    remainingAmount: number | null;
+    /** Toplam bakiye = ödenmiş + bonus */
+    balance: number;
+    paidBalance: number;
+    bonusBalance: number;
 }
 interface CheckPaymentResponse {
     success: boolean;
@@ -800,7 +933,7 @@ interface CrafterEventMap {
     };
     'discord:unlinked': void;
     'cart:purchased': PurchaseResponse;
-    'cart:checkout': any;
+    'cart:checkout': CheckoutPaymentResponse;
     'license:verified': {
         valid: boolean;
         productId?: string;
@@ -860,6 +993,7 @@ interface CrafterEventMap {
     };
     'payment:initiated': InitiatePaymentResponse;
     'payment:checked': CheckPaymentResponse;
+    'payment:status': PaymentStatusResult;
 }
 type CrafterEventName = keyof CrafterEventMap;
 
@@ -1254,10 +1388,82 @@ declare class StoreModule {
     getConfig(): Promise<MarketplaceConfig>;
 }
 
+/** Payment modülünün kullandığı yapılandırma alanları */
+type PaymentsModuleOptions = Pick<CrafterConfig, 'websiteId' | 'stripePublishableKey'>;
+/** Backend yanıtındaki Stripe Tax alanlarından tipli vergi kırılımı; `subtotal` yoksa null. */
+declare function parseTaxBreakdown(raw: Record<string, any> | null | undefined): PaymentTaxBreakdown | null;
+/**
+ * Ödeme başlatma / sepet ödeme yanıtını normalize eder (eklemeli: ham alanlar korunur).
+ * - `paymentId`: backend `payment_id` döndürür; `paymentId` yoksa doldurulur.
+ * - `tax`: Stripe Tax kırılımı (yoksa null).
+ * - `stripe`: yalnızca `type === 'stripe'` ve `clientSecret` varsa (satıcı LLC + CrafterPayments).
+ */
+declare function normalizePaymentResponse<T extends Record<string, any>>(raw: T, fallbackPublishableKey?: string | null): T & InitiatePaymentResponse;
+/** Alıcının onayladığı sözleşme sürümü / bölge eki (CrafterPayments onay kaydı, chargeback kanıtı). */
+interface LegalTermsConsent {
+    version: string;
+    region?: string;
+}
+/** Sözleşme onayı başlıkları: x-legal-terms-version / x-legal-terms-region */
+declare function legalTermsHeaders(consent?: LegalTermsConsent): Record<string, string> | undefined;
+/**
+ * Public durum yanıtını yorumlar. Backend'in public `delivery` özeti:
+ * pending → PENDING, delivered → DELIVERED, failed → NEEDS_REVIEW (teslim edilemedi / incelemede), refunded → REFUNDED.
+ * Backend ileride `deliveryStatus` döndürürse o kullanılır.
+ */
+declare function parsePaymentStatus(paymentId: string, raw: Record<string, any> | null | undefined): PaymentStatusResult;
+/** Formdaki en yüksek bakiye yükleme tutarı: sağlayıcı üst sınırı, tek yükleme limiti ve kalan ödenmiş bakiye hakkı. */
+declare function topUpMaxAmount(policy: BalanceTopUpPolicy | null | undefined, providerMax?: number): number;
+declare class PaymentsModule {
+    private http;
+    private events;
+    private options;
+    constructor(http: HttpClient, events: EventEmitter, options?: PaymentsModuleOptions);
+    /**
+     * Get public active payment providers and bonus multipliers.
+     * GET /config/payment/public
+     */
+    getPublicProviders(): Promise<PublicPaymentProvider[]>;
+    /**
+     * Initiate a payment session (PayTR, Shopier, KuveytTürk, CrafterPayments etc.).
+     * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi) bulunur.
+     * POST /payment/initiate
+     */
+    initiate(data: InitiatePaymentDto | (Omit<InitiatePaymentDto, 'providerId'> & {
+        provider?: string;
+        providerId?: string;
+    }), options?: {
+        legalTerms?: LegalTermsConsent;
+    }): Promise<InitiatePaymentResponse>;
+    /**
+     * Check payment status by payment ID.
+     * POST /payment/check
+     */
+    check(paymentId: string): Promise<CheckPaymentResponse>;
+    /**
+     * Ödeme ve teslimat durumu (oturum gerektirmez). Stripe ödemesinde webhook gecikirse backend ödemeyi Stripe'tan okur.
+     * GET /payment/status/:paymentId
+     */
+    getStatus(paymentId: string): Promise<PaymentStatusResult>;
+    /**
+     * Ödeme sonucu kesinleşene kadar `getStatus` ile yoklar (Stripe `confirmPayment` sonrası).
+     * Ödeme alındı ama teslimat sürüyorsa yoklama devam eder. Süre dolarsa son görülen durum döner.
+     * Ağ hataları yutulur, yoklama sürer.
+     */
+    waitForResult(paymentId: string, options?: WaitForPaymentOptions): Promise<PaymentStatusResult>;
+    /**
+     * Bakiye yükleme koşulları: açık mı, limitler (USD ve mağaza para birimi), ödenmiş / bonus bakiye
+     * ve koşul metninin gösterilip gösterilmeyeceği (`showTerms`). Oturum gerektirir.
+     * GET /payment/balance-top-up/policy?websiteId=
+     */
+    getTopUpPolicy(websiteId?: string): Promise<BalanceTopUpPolicy>;
+}
+
 declare class CartModule {
     private http;
     private events;
-    constructor(http: HttpClient, events: EventEmitter);
+    private options;
+    constructor(http: HttpClient, events: EventEmitter, options?: PaymentsModuleOptions);
     /**
      * Complete purchase using user balance.
      * POST /marketplace/purchase
@@ -1266,6 +1472,8 @@ declare class CartModule {
     /**
      * Pay the cart at a provider. The charged amount is the storefront total.
      * Balance is not credited and the top-up multiplier is not applied.
+     * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi kırılımı) bulunur.
+     * Stok yetersizse `CrafterOutOfStockError` (HTTP 409, `productIds`) fırlatılır.
      * POST /payment/checkout
      */
     checkout(data: PurchaseDto & {
@@ -1280,7 +1488,13 @@ declare class CartModule {
             phone?: string;
             address?: string;
         };
-    }): Promise<any>;
+        /** Alıcının ülkesi (ISO 3166-1 alpha-2); satıcı LLC iken Stripe Tax vergi konumu */
+        billingCountry?: string;
+        /** ABD / Kanada için posta kodu (Stripe Tax) */
+        billingPostalCode?: string;
+    }, options?: {
+        legalTerms?: LegalTermsConsent;
+    }): Promise<CheckoutPaymentResponse>;
 }
 
 declare class ChestModule {
@@ -1437,30 +1651,6 @@ declare class ServersModule {
      * Alias for getList.
      */
     list(): Promise<ServerStatusItem[]>;
-}
-
-declare class PaymentsModule {
-    private http;
-    private events;
-    constructor(http: HttpClient, events: EventEmitter);
-    /**
-     * Get public active payment providers and bonus multipliers.
-     * GET /config/payment/public
-     */
-    getPublicProviders(): Promise<PublicPaymentProvider[]>;
-    /**
-     * Initiate a payment session (PayTR, Shopier, CrafterPayments etc.).
-     * POST /payment/initiate
-     */
-    initiate(data: InitiatePaymentDto | (Omit<InitiatePaymentDto, 'providerId'> & {
-        provider?: string;
-        providerId?: string;
-    })): Promise<InitiatePaymentResponse>;
-    /**
-     * Check payment status by payment ID.
-     * POST /payment/check
-     */
-    check(paymentId: string): Promise<CheckPaymentResponse>;
 }
 
 declare class StatisticsModule {
@@ -1888,17 +2078,70 @@ declare function toLexical(content: string | Record<string, any>): SerializedEdi
 declare class CrafterError extends Error {
     readonly statusCode: number;
     readonly error?: string;
+    /** Backend hata kodu (ErrorType), ör. 'out_of_stock', 'balance_top_up_limit_exceeded' */
+    readonly type?: string;
     readonly details?: Record<string, any>;
     readonly isCrafterError = true;
     constructor(payload: {
         message: string | string[];
         statusCode?: number;
         error?: string;
+        type?: string;
         details?: Record<string, any>;
     });
     static fromResponse(statusCode: number, data: any): CrafterError;
 }
+/** Ödeme akışıyla ilgili backend hata kodları (ErrorType). */
+declare const PaymentErrorType: {
+    readonly OUT_OF_STOCK: "out_of_stock";
+    readonly BALANCE_TOP_UP_UNAVAILABLE: "balance_top_up_unavailable";
+    readonly BALANCE_TOP_UP_LIMIT_EXCEEDED: "balance_top_up_limit_exceeded";
+    readonly BALANCE_TOP_UP_TOTAL_LIMIT_EXCEEDED: "balance_top_up_total_limit_exceeded";
+    readonly SELLER_ENTITY_NOT_READY: "seller_entity_not_ready";
+    readonly TAX_CALCULATION_FAILED: "tax_calculation_failed";
+    readonly TAX_LOCATION_INVALID: "tax_location_invalid";
+    readonly PAYMENT_PROVIDER_NOT_FOUND: "payment_provider_not_found";
+    readonly PAYMENT_PROVIDER_UNSUPPORTED: "payment_provider_unsupported";
+    readonly PAYMENT_CONFIG_ERROR: "payment_config_error";
+    readonly PAYMENT_INITIALIZATION_FAILED: "payment_initialization_failed";
+    readonly PAYMENT_FAILED: "payment_failed";
+};
+type PaymentErrorTypeValue = (typeof PaymentErrorType)[keyof typeof PaymentErrorType];
+type ErrorPayload = ConstructorParameters<typeof CrafterError>[0];
+/** Stok ödeme başlatılırken yetersiz çıktı (HTTP 409, `out_of_stock`). */
+declare class CrafterOutOfStockError extends CrafterError {
+    /** Tükenen ürünlerin kimlikleri (`details.productIds`); backend göndermediyse boş */
+    readonly productIds: string[];
+    constructor(payload: ErrorPayload);
+}
+/** Bakiye yükleme limit bilgisi (hata `details` alanından). */
+interface BalanceTopUpLimits {
+    currency?: string;
+    maxSingleUsd?: number;
+    maxPaidUsd?: number;
+    maxSingleAmount?: number | null;
+    remainingAmount?: number | null;
+}
+/** Bakiye yüklemesi reddedildi: kapalı, tek yükleme limiti veya toplam ödenmiş bakiye limiti aşıldı. */
+declare class CrafterBalanceTopUpError extends CrafterError {
+    readonly reason: 'unavailable' | 'single_limit' | 'total_limit';
+    /** Limit hatalarında backend'in döndürdüğü limitler; `unavailable` için null */
+    readonly limits: BalanceTopUpLimits | null;
+    constructor(payload: ErrorPayload);
+}
+/**
+ * Ödeme sağlayıcısı / altyapı hatası: sağlayıcı bulunamadı, satıcı altyapısı hazır değil,
+ * Stripe Tax vergi hesaplanamadı, ödeme başlatılamadı vb. `type` alanı ayrıntıyı verir.
+ */
+declare class CrafterPaymentProviderError extends CrafterError {
+    /** Kullanıcı aynı bilgilerle biraz sonra tekrar deneyebilir mi */
+    readonly retryable: boolean;
+    constructor(payload: ErrorPayload);
+}
 declare function isCrafterError(err: unknown): err is CrafterError;
+declare function isOutOfStockError(err: unknown): err is CrafterOutOfStockError;
+declare function isBalanceTopUpError(err: unknown): err is CrafterBalanceTopUpError;
+declare function isPaymentProviderError(err: unknown): err is CrafterPaymentProviderError;
 
 declare class Crafter {
     readonly config: CrafterConfig;
@@ -1980,4 +2223,4 @@ declare class Crafter {
 
 // @ts-ignore
 export = Crafter;
-export { type Auth2FaRequiredResponse, type AuthEmailVerificationRequiredResponse, AuthModule, type AuthResponse, type AuthSuccessResponse, type BulkDiscountConfig, CartModule, type Category, type ChangePasswordDto, type CheckPaymentResponse, type ChestItem, ChestModule, type ChestProductSummary, type CouponResponse, CouponsModule, Crafter, type CrafterApiError, type CrafterConfig, CrafterError, type CrafterEventMap, type CrafterEventName, type CreateReportDto, type CreateTicketDto, type DisableTwoFactorDto, type DiscordStatusData, type DiscordStatusResponse, EventEmitter, type EventHandler, type ForumCategory, type ForumMessage, type ForumMessageReply, ForumModule, type ForumTopic, type GiftChestItemResponse, type HelpArticleItem, type HelpCategoryItem, type HelpFaqItem, type HelpcenterCategoryDetailResponse, HelpcenterModule, type HelpcenterOverviewResponse, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, type InGameAuthDto, type InitiatePaymentDto, type InitiatePaymentResponse, type InitiatePaymentUser, type LatestPayment, type LatestPurchase, type LatestSignup, type LegalDocuments, LegalModule, type LexicalHtmlOptions, type LicenseRecord, type LicenseVerification, LicensesModule, type LightweightBalanceResponse, type LikePostResponse, type LikeTopicResponse, LuckPermsModule, type LuckPermsPermissionNode, type LuckPermsPlayerData, type MarketplaceConfig, type PageItem, PagesModule, type PaginatedPostsResponse, type PaginatedPunishmentsResponse, PaymentsModule, type PostAuthor, type PostItem, type PostQueryDto, PostsModule, type Product, type PublicPaymentProvider, type PunishmentItem, PunishmentsModule, type PurchaseDto, type PurchaseItemDto, type PurchaseResponse, RedeemCodeModule, type ReplyTicketDto, type ReportResponse, type ReportType, ReportsModule, type RequestOptions, type ResetPasswordDto, SearchModule, type SearchResultItem, type SendBalanceParams, type SendBalanceResponse, SeoModule, type SerializedCodeNode, type SerializedEditorState, type SerializedElementNode, type SerializedHeadingNode, type SerializedHorizontalRuleNode, type SerializedImageNode, type SerializedLexicalNode, type SerializedLinkNode, type SerializedListItemNode, type SerializedListNode, type SerializedQuoteNode, type SerializedRootNode, type SerializedTableCellNode, type SerializedTableNode, type SerializedTableRowNode, type SerializedTextNode, type ServerStatusItem, ServersModule, type SignInDto, type SignUpDto, type SinglePostResponse, type SiteStatistics, type SitemapUrlItem, type StaffFormApplicationResponse, type StaffFormApplicationValue, type StaffFormInput, type StaffFormItem, StaffFormsModule, StatisticsModule, StoreModule, type Ticket, type TicketCategory, type TicketCategoryDetails, type TicketMessage, type TicketMessageSender, TicketsModule, type TopCreditLoader, type TwoFactorStatusResponse, type TwoFactorValidateDto, type UpdateOwnUserDto, type UseChestItemResponse, type UseRedeemCodeResponse, type UserProfile, type UserRole, UsersModule, VoteModule, type VoteProcessResponse, type VoteProviderItem, type WallMessage, type WallMessageReply, type WebsiteInfo, WebsiteModule, type WebsitePluginModule, type WebsiteSeoConfig, htmlToLexical, isCrafterError, isLexicalFormat, lexicalToHtml, lexicalToPlainText, lexicalToText, toLexical };
+export { type Auth2FaRequiredResponse, type AuthEmailVerificationRequiredResponse, AuthModule, type AuthResponse, type AuthSuccessResponse, type BalanceTopUpLimits, type BalanceTopUpPolicy, type BulkDiscountConfig, CartModule, type Category, type ChangePasswordDto, type CheckPaymentResponse, type CheckoutPaymentResponse, type ChestItem, ChestModule, type ChestProductSummary, type CouponResponse, CouponsModule, Crafter, type CrafterApiError, CrafterBalanceTopUpError, type CrafterConfig, CrafterError, type CrafterEventMap, type CrafterEventName, CrafterOutOfStockError, CrafterPaymentProviderError, type CreateReportDto, type CreateTicketDto, type DisableTwoFactorDto, type DiscordStatusData, type DiscordStatusResponse, EventEmitter, type EventHandler, type ForumCategory, type ForumMessage, type ForumMessageReply, ForumModule, type ForumTopic, type GiftChestItemResponse, type HelpArticleItem, type HelpCategoryItem, type HelpFaqItem, type HelpcenterCategoryDetailResponse, HelpcenterModule, type HelpcenterOverviewResponse, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, type InGameAuthDto, type InitiatePaymentDto, type InitiatePaymentResponse, type InitiatePaymentUser, type LatestPayment, type LatestPurchase, type LatestSignup, type LegalDocuments, LegalModule, type LegalTermsConsent, type LexicalHtmlOptions, type LicenseRecord, type LicenseVerification, LicensesModule, type LightweightBalanceResponse, type LikePostResponse, type LikeTopicResponse, LuckPermsModule, type LuckPermsPermissionNode, type LuckPermsPlayerData, type MarketplaceConfig, type PageItem, PagesModule, type PaginatedPostsResponse, type PaginatedPunishmentsResponse, type PaymentDeliveryStatus, PaymentErrorType, type PaymentErrorTypeValue, type PaymentOutcome, type PaymentRecordStatus, type PaymentSessionType, type PaymentStatusResult, type PaymentTaxBreakdown, type PaymentTaxLine, PaymentsModule, type PaymentsModuleOptions, type PostAuthor, type PostItem, type PostQueryDto, PostsModule, type Product, type PublicDeliveryState, type PublicPaymentProvider, type PunishmentItem, PunishmentsModule, type PurchaseDto, type PurchaseItemDto, type PurchaseResponse, RedeemCodeModule, type ReplyTicketDto, type ReportResponse, type ReportType, ReportsModule, type RequestOptions, type ResetPasswordDto, SearchModule, type SearchResultItem, type SendBalanceParams, type SendBalanceResponse, SeoModule, type SerializedCodeNode, type SerializedEditorState, type SerializedElementNode, type SerializedHeadingNode, type SerializedHorizontalRuleNode, type SerializedImageNode, type SerializedLexicalNode, type SerializedLinkNode, type SerializedListItemNode, type SerializedListNode, type SerializedQuoteNode, type SerializedRootNode, type SerializedTableCellNode, type SerializedTableNode, type SerializedTableRowNode, type SerializedTextNode, type ServerStatusItem, ServersModule, type SignInDto, type SignUpDto, type SinglePostResponse, type SiteStatistics, type SitemapUrlItem, type StaffFormApplicationResponse, type StaffFormApplicationValue, type StaffFormInput, type StaffFormItem, StaffFormsModule, StatisticsModule, StoreModule, type StripePaymentSession, type Ticket, type TicketCategory, type TicketCategoryDetails, type TicketMessage, type TicketMessageSender, TicketsModule, type TopCreditLoader, type TwoFactorStatusResponse, type TwoFactorValidateDto, type UpdateOwnUserDto, type UseChestItemResponse, type UseRedeemCodeResponse, type UserProfile, type UserRole, UsersModule, VoteModule, type VoteProcessResponse, type VoteProviderItem, type WaitForPaymentOptions, type WallMessage, type WallMessageReply, type WebsiteInfo, WebsiteModule, type WebsitePluginModule, type WebsiteSeoConfig, htmlToLexical, isBalanceTopUpError, isCrafterError, isLexicalFormat, isOutOfStockError, isPaymentProviderError, legalTermsHeaders, lexicalToHtml, lexicalToPlainText, lexicalToText, normalizePaymentResponse, parsePaymentStatus, parseTaxBreakdown, toLexical, topUpMaxAmount };

@@ -41,6 +41,12 @@ export interface CrafterConfig {
    * Callback fired when token is updated or cleared.
    */
   onTokenChange?: (token: string | null) => void;
+
+  /**
+   * Stripe publishable key (pk_test_... / pk_live_...). Satıcı LLC iken Payment Element için kullanılır.
+   * Backend ödeme yanıtında anahtar döndürürse o önceliklidir. Gizli değildir.
+   */
+  stripePublishableKey?: string;
 }
 
 export interface RequestOptions extends RequestInit {
@@ -52,6 +58,8 @@ export interface CrafterApiError {
   statusCode: number;
   message: string | string[];
   error?: string;
+  /** Backend hata kodu (ErrorType), ör. 'out_of_stock' */
+  type?: string;
   details?: Record<string, any>;
 }
 
@@ -550,7 +558,58 @@ export interface InitiatePaymentDto {
   currency?: string;
   websiteId?: string;
   user: InitiatePaymentUser;
+  /** Alıcının ülkesi (ISO 3166-1 alpha-2); satıcı LLC iken Stripe Tax vergi konumu */
+  billingCountry?: string;
+  /** ABD / Kanada için posta kodu (Stripe Tax) */
+  billingPostalCode?: string;
   [key: string]: any;
+}
+
+/** Backend'in ödeme başlatma yanıt türü. `stripe`: satıcı LLC + CrafterPayments (Payment Element). */
+export type PaymentSessionType = 'iframe' | 'redirect' | 'kuveytturk_init' | 'stripe' | (string & {});
+
+/** Stripe Tax vergi satırı (ülke / eyalet, vergi türü, oran ve tutar). */
+export interface PaymentTaxLine {
+  country: string | null;
+  state: string | null;
+  /** 'vat' | 'sales_tax' | 'gst' | 'hst' | 'pst' | 'qst' ... */
+  taxType: string | null;
+  /** Yüzde olarak oran (ör. 19 = %19) */
+  rate: number;
+  amount: number;
+}
+
+/** Vergi kırılımı ve toplam (yalnızca backend `subtotal` döndürdüğünde, yani Stripe Tax hesaplandığında). */
+export interface PaymentTaxBreakdown {
+  /** Vergi hariç tutar */
+  subtotal: number;
+  /** Toplam vergi */
+  taxAmount: number;
+  /** Tahsil edilecek toplam (vergi dahil) */
+  total: number;
+  currency: string;
+  lines: PaymentTaxLine[];
+}
+
+/**
+ * Satıcı LLC iken CrafterPayments ödemesi: Stripe Payment Element ile sayfa içinde tamamlanır.
+ * Stripe.js SDK'ya gömülü değildir; tema geliştiricisi kendisi yükler (bkz. wiki/07-payments.md).
+ */
+export interface StripePaymentSession {
+  paymentId: string;
+  /** PaymentIntent client secret'ı: `stripe.elements({ clientSecret })` */
+  clientSecret: string;
+  /**
+   * Stripe publishable key. Backend yanıtında varsa oradan, yoksa `CrafterConfig.stripePublishableKey`'den gelir.
+   * İkisi de yoksa null'dır (tema kendi anahtarını kullanmalı).
+   */
+  publishableKey: string | null;
+  /** Tahsil edilecek toplam (vergi dahil) */
+  amount: number;
+  currency: string;
+  merchantOid?: string;
+  /** Stripe Tax kırılımı; backend vergi bilgisi döndürmediyse null */
+  tax: PaymentTaxBreakdown | null;
 }
 
 export interface InitiatePaymentResponse {
@@ -558,7 +617,94 @@ export interface InitiatePaymentResponse {
   iframeUrl?: string;
   paymentId?: string;
   paymentUrl?: string;
+  success?: boolean;
+  type?: PaymentSessionType;
+  /** Backend'in ham alanı; SDK ayrıca `paymentId` olarak da döndürür */
+  payment_id?: string;
+  payment_url?: string;
+  redirectUrl?: string;
+  iframeHtml?: string;
+  /** type = kuveytturk_init: 3D formu */
+  html?: string;
+  merchant_oid?: string;
+  amount?: number | string;
+  currency?: string;
+  /** type = stripe: PaymentIntent client secret'ı */
+  clientSecret?: string;
+  /** type = stripe: vergi hariç tutar, toplam vergi ve satırlar (ham alanlar) */
+  subtotal?: number;
+  taxAmount?: number;
+  taxes?: PaymentTaxLine[];
+  /** Sepet bakiyeyle tamamen ödendiyse ürünler teslim edilmiştir; sağlayıcıya gidilmez */
+  delivered?: boolean;
+  /** SDK tarafından eklenir: type = stripe ise Payment Element için gereken her şey, değilse yok */
+  stripe?: StripePaymentSession;
+  /** SDK tarafından eklenir: vergi kırılımı (yoksa null) */
+  tax?: PaymentTaxBreakdown | null;
   [key: string]: any;
+}
+
+/** Sepet ödemesi (`cart.checkout`) yanıtı; ödeme başlatma yanıtıyla aynı yapıdadır. */
+export type CheckoutPaymentResponse = InitiatePaymentResponse;
+
+/** Backend ödeme kaydı durumu (public durum ucu). */
+export type PaymentRecordStatus = 'PENDING' | 'COMPLETED' | 'FAILED' | 'CANCELED' | 'REFUNDED' | (string & {});
+
+/** Public durum ucunun döndürdüğü teslimat özeti; eski backend veya teslimatsız ödemede null. */
+export type PublicDeliveryState = 'pending' | 'delivered' | 'failed' | 'refunded' | null;
+
+/**
+ * Teslimat durumu (backend `deliveryStatus` değerleriyle aynı adlar).
+ * - NEEDS_REVIEW: ödeme alındı ama teslimat yapılamadı / incelemede; mağaza yetkilisi müdahale etmeli.
+ * - REFUNDED: ürün tükendiği için teslim edilemedi ve ödeme otomatik iade edildi.
+ */
+export type PaymentDeliveryStatus = 'PENDING' | 'DELIVERED' | 'NEEDS_REVIEW' | 'REFUNDED';
+
+/** Ödeme sonrası alıcıya gösterilecek sonuç. */
+export type PaymentOutcome = 'processing' | 'success' | 'pending' | 'failed' | 'refunded' | 'needs_review';
+
+export interface PaymentStatusResult {
+  paymentId: string;
+  status: PaymentRecordStatus;
+  /** Backend'in ham teslimat özeti */
+  delivery: PublicDeliveryState;
+  /** Teslimat durumu; teslimat bilgisi yoksa null */
+  deliveryStatus: PaymentDeliveryStatus | null;
+  /** Ödeme + teslimat birleşik sonucu */
+  outcome: PaymentOutcome;
+  /** Sonuç kesinleşti mi (yoklama durdurulabilir) */
+  final: boolean;
+}
+
+export interface WaitForPaymentOptions {
+  /** Deneme sayısı (varsayılan 20) */
+  attempts?: number;
+  /** Denemeler arası bekleme, ms (varsayılan 1500) */
+  intervalMs?: number;
+  signal?: AbortSignal;
+}
+
+/** Site bakiyesi yükleme koşulları: `GET /payment/balance-top-up/policy` */
+export interface BalanceTopUpPolicy {
+  /** Bakiye yükleme açık mı */
+  enabled: boolean;
+  /** Satıcı LLC: kapalı devre bakiye kuralları ve limitler geçerli */
+  closedLoop: boolean;
+  /** SDK tarafından eklenir: yükleme ekranında bakiye koşul metni gösterilmeli mi (closedLoop ile aynı) */
+  showTerms: boolean;
+  /** Mağaza para birimi */
+  currency: string;
+  /** Tek yüklemede en fazla (USD) */
+  maxSingleUsd: number;
+  /** Mağaza başına ödenmiş bakiye üst sınırı (USD) */
+  maxPaidUsd: number;
+  /** Mağaza para birimi karşılıkları; kur yoksa veya TR modunda null */
+  maxSingleAmount: number | null;
+  remainingAmount: number | null;
+  /** Toplam bakiye = ödenmiş + bonus */
+  balance: number;
+  paidBalance: number;
+  bonusBalance: number;
 }
 
 export interface CheckPaymentResponse {
@@ -912,7 +1058,7 @@ export interface CrafterEventMap {
 
   // ================= Store & Cart =================
   'cart:purchased': PurchaseResponse;
-  'cart:checkout': any;
+  'cart:checkout': CheckoutPaymentResponse;
   'license:verified': { valid: boolean; productId?: string; type?: string; downloadable?: boolean };
 
   // ================= Chest =================
@@ -944,6 +1090,7 @@ export interface CrafterEventMap {
   // ================= Payments =================
   'payment:initiated': InitiatePaymentResponse;
   'payment:checked': CheckPaymentResponse;
+  'payment:status': PaymentStatusResult;
 }
 
 export type CrafterEventName = keyof CrafterEventMap;
