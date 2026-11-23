@@ -100,7 +100,7 @@ const crafter = new Crafter({
 
 ---
 
-## 🛠️ Modüller & API Referansı (24 Modül)
+## 🛠️ Modüller & API Referansı (25 Modül)
 
 | Modül | Base Proxy Yolu | Metotlar & Açıklama |
 | :--- | :--- | :--- |
@@ -121,7 +121,8 @@ const crafter = new Crafter({
 | **`crafter.coupons`** | `/coupons` | `get(couponCode)` *(İndirim oranı ve geçerlilik kontrolü)* |
 | **`crafter.redeemCode`** | `/redeem-codes` | `use(code)` *(Promosyon / hediye kartı bozdurma)* |
 | **`crafter.servers`** | `/config/servers` | `getList()` *(Canlı sunucu durumu, online/max oyuncu sayısı, ping)* |
-| **`crafter.payments`** | `/payment` & `/config/payment` | `getPublicProviders()` *(Açık ödeme yöntemleri ve bonus oranları)*, `initiate({ amount, providerId, user })`, `check(paymentId)` |
+| **`crafter.payments`** | `/payment` & `/config/payment` | `getPublicProviders()` *(Açık ödeme yöntemleri ve bonus oranları)*, `initiate({ amount, providerId, user })`, `quote()`, `check(paymentId)` |
+| **`crafter.currencies`** | `/payment/currencies` | `context()` *(müşteri para birimi, izinli para birimleri ve kurlar)*, `convert(amounts)` |
 | **`crafter.vote`** | `/config/vote-providers` | `getProviders()` *(Aktif oy siteleri ve bekleme süreleri)*, `vote(providerId)` |
 | **`crafter.legal`** | `/config/legal` | `getDocuments()` *(Kurallar, gizlilik politikası, kullanım koşulları)* |
 | **`crafter.reports`** | `/reports` | `create(reportedUserId, { reportType, reason })` *(Oyuncu şikayet etme)* |
@@ -137,7 +138,9 @@ const crafter = new Crafter({
 ```javascript
 // Tam profil nesnesi yerine sadece bakiye ve para birimini çeker:
 const balanceData = await crafter.users.getBalance('me');
-document.querySelector('#header-balance').innerText = `${balanceData.balance} ${balanceData.currency}`;
+const { balance, currency } = balanceData.data || balanceData;
+// Sembol ve ondalık para biriminden gelir ('TL' / '₺' sabit yazılmaz)
+document.querySelector('#header-balance').innerText = Crafter.utils.formatMoney(balance, currency);
 ```
 
 ### 2. Canlı Navbar Araması (Autocomplete)

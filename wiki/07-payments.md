@@ -26,8 +26,9 @@ Sitede müşterilere açık olan ödeme sağlayıcılarını (PayTR, Shopier, Cr
 * **Örnek Kullanım:**
   ```javascript
   const providers = await crafter.payments.getPublicProviders();
+  const { currency } = await crafter.website.getInfo(); // limitler mağaza para biriminde
   providers.forEach(p => {
-    console.log(`${p.name} (Min: ${p.minAmount} TL - Bonus: x${p.creditMultipler})`);
+    console.log(`${p.name} (Min: ${Crafter.utils.formatMoney(p.minAmount, currency)} - Bonus: x${p.creditMultipler})`);
   });
   ```
 
@@ -42,7 +43,8 @@ Yeni bir ödeme oturumu başlatır ve iframe token'ı veya yönlendirme URL'i al
   interface InitiatePaymentDto {
     amount: number;         // Yüklenecek tutar
     providerId: string;     // getPublicProviders()'dan gelen provider ID
-    currency?: string;      // Varsayılan: 'TRY'
+    currency?: string;      // Gönderilmez: para birimini sunucu belirler (yalnızca teklifin para birimi)
+    quoteId?: string;       // Kilitli kur teklifi (payments.quote); müşteri para biriminde ödeme
     user: {
       name: string;
       email: string;
@@ -138,7 +140,6 @@ const res = await crafter.cart.checkout(
   {
     websiteId: 'site-uuid',
     providerId: crafterPaymentsProvider.id,
-    currency: 'USD',                      // mağaza para birimi (varsayılan 'TRY')
     items: [{ productId: 'prod-1', quantity: 1 }],
     user: { name: 'Test Buyer', email: 'buyer@example.com', address: 'United States' },
     billingCountry: 'US',
@@ -281,3 +282,66 @@ try {
 ```
 
 Kart reddi gibi Stripe hataları `stripe.confirmPayment` sonucundan (`error.message`) gelir; SDK'dan geçmez.
+
+---
+
+## 💱 Müşteri para birimi — v1.3.0
+
+Ödemenin para birimini **sunucu** belirler (mağaza para birimi). SDK artık `currency: 'TRY'` göndermez; `currency` verilmezse alan hiç gönderilmez. Mağazanınkinden farklı bir para birimi gönderilirse backend 400 `payment_currency_mismatch`, desteklenmeyen para biriminde 400 `payment_currency_unsupported` döner.
+
+Müşterinin para birimini vitrin belirler (`POST /localization` ile `currency`, `crafter_currency` çerezi); SDK kendi çerezini yazmaz. Direct modda çerez yoksa `customerCurrency` / `currency` parametresiyle öneri verilebilir; sunucu izinli değilse ülke ya da mağaza para birimini seçer.
+
+### 6. Fiyat gösterimi: `crafter.currencies`
+
+```javascript
+// GET /payment/currencies?websiteId=&currency=
+const ctx = await crafter.currencies.context();
+// { storeCurrency: 'USD', mode: 'auto', enabled: true, currencies: ['USD', 'EUR'], currency: 'EUR',
+//   source: 'country', rate: 0.92, rates: { EUR: 0.92 }, markupPercent: 2, rateDate, rateSource }
+
+// POST /payment/currencies/convert (en fazla 500 tutar, sıra korunur)
+const { currency, amounts } = await crafter.currencies.convert(products.map((p) => p.price));
+products.forEach((p, i) => (p.displayPrice = Crafter.utils.formatMoney(amounts[i], currency, 'de-DE')));
+```
+
+Çevrilen tutarlar yalnızca **gösterim** içindir; tahsil edilen tutar kilitli teklifle belirlenir.
+
+### 7. Müşteri para biriminde ödeme (`useCustomerCurrency`)
+
+İsteğe bağlıdır; verilmezse ödeme bugünkü gibi mağaza para biriminde başlar.
+
+```javascript
+const res = await crafter.cart.checkout(
+  { websiteId, providerId, items, user, billingCountry: 'DE' },
+  { useCustomerCurrency: true } // isteğe bağlı: customerCurrency: 'EUR'
+);
+// Bakiye yükleme: crafter.payments.initiate({ amount, providerId, user }, { useCustomerCurrency: true })
+
+if (res.customerCurrencyDisabled) {
+  // Mağaza müşteri para birimini kapattı; ödeme mağaza para biriminde başladı
+}
+if (res.presentment) {
+  // amount / currency / subtotal / taxAmount / taxes müşteri para biriminde
+  // res.presentment: { quoteId, currency, amount, rate, rateDate, storeCurrency, storeAmount }
+}
+```
+
+Akış:
+
+1. `POST /payment/quote` (`kind: 'cart'` sepet alanlarıyla ya da `kind: 'top_up'` tutarla) → `{ quoteId, storeAmount, storeCurrency, currency, amount, rate, expiresAt }` (~30 dk geçerli).
+2. Ödeme `quoteId` ve teklifin para birimiyle başlatılır.
+3. 409 `presentment_quote_expired` / `presentment_quote_mismatch` veya 404 `presentment_quote_not_found` → **bir kez** yeni teklif alınır.
+4. 400 `customer_currency_not_allowed` → teklifsiz, mağaza para biriminde ödenir (`customerCurrencyDisabled: true`).
+
+Teklifi elle almak için: `const q = await crafter.payments.quote({ kind: 'cart', items })`, ardından `cart.checkout({ ..., quoteId: q.quoteId, currency: q.currency })`.
+
+### 8. Tutar biçimlendirme: `formatMoney`
+
+```javascript
+import { formatMoney } from '@crafter-cms/sdk'; // ya da Crafter.utils.formatMoney
+formatMoney(9.99, 'USD', 'en-US');  // '$9.99'
+formatMoney(250, 'TRY', 'tr-TR');   // '₺250,00'
+formatMoney(1234.5, 'EUR', 'de-DE'); // '1.234,50 €'
+```
+
+Sembol ve ondalık hane para biriminden gelir; temalarda 'TL' / '₺' sabit yazılmamalıdır.

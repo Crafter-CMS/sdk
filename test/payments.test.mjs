@@ -111,12 +111,12 @@ test('TR: PayTR iframe yanıtı aynen döner, stripe alanı eklenmez', async () 
   assert.equal(res.paymentId, 'p2');
 });
 
-test('TR: KuveytTürk ve Shopier yanıtları değişmez; varsayılan para birimi TRY', async () => {
+test('TR: KuveytTürk ve Shopier yanıtları değişmez; para birimi gönderilmez (sunucu belirler)', async () => {
   reply(200, { success: true, type: 'kuveytturk_init', payment_id: 'p3', html: '<form></form>' });
   reply(200, { success: true, type: 'redirect', payment_id: 'p4', payment_url: 'https://pay.example.test/x' });
   const crafter = direct();
   const kt = await crafter.cart.checkout({ providerId: 'kt', websiteId: 'site-1', productIds: ['a'], user: buyer });
-  assert.equal(JSON.parse(calls[0].init.body).currency, 'TRY');
+  assert.equal('currency' in JSON.parse(calls[0].init.body), false);
   assert.equal(kt.html, '<form></form>');
   assert.equal(kt.stripe, undefined);
   const sh = await crafter.payments.initiate({ amount: 50, providerId: 'shopier', user: buyer });

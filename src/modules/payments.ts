@@ -1,9 +1,11 @@
 import { HttpClient } from '../core/http';
 import { EventEmitter } from '../core/events';
+import { isCrafterError, PaymentErrorType } from '../core/errors';
 import {
   BalanceTopUpPolicy,
   CheckPaymentResponse,
   CrafterConfig,
+  CustomerCurrencyOptions,
   InitiatePaymentDto,
   InitiatePaymentResponse,
   PaymentDeliveryStatus,
@@ -12,6 +14,8 @@ import {
   PaymentStatusResult,
   PaymentTaxBreakdown,
   PaymentTaxLine,
+  PresentmentQuote,
+  PresentmentQuoteRequest,
   PublicDeliveryState,
   PublicPaymentProvider,
   StripePaymentSession,
@@ -80,6 +84,7 @@ export function normalizePaymentResponse<T extends Record<string, any>>(
       tax,
     };
     if (raw.merchant_oid) session.merchantOid = String(raw.merchant_oid);
+    if (raw.presentment && typeof raw.presentment === 'object') session.presentment = raw.presentment;
     result.stripe = session;
   }
   return result as T & InitiatePaymentResponse;
@@ -97,6 +102,45 @@ export function legalTermsHeaders(consent?: LegalTermsConsent): Record<string, s
   const headers: Record<string, string> = { 'x-legal-terms-version': consent.version };
   if (consent.region) headers['x-legal-terms-region'] = consent.region;
   return headers;
+}
+
+/** Yeni teklifle bir kez tekrar denenen hatalar */
+const QUOTE_RETRY_ERRORS: string[] = [
+  PaymentErrorType.PRESENTMENT_QUOTE_EXPIRED,
+  PaymentErrorType.PRESENTMENT_QUOTE_MISMATCH,
+  PaymentErrorType.PRESENTMENT_QUOTE_NOT_FOUND,
+];
+
+const errorType = (err: unknown) => (isCrafterError(err) ? err.type : undefined);
+
+/**
+ * Müşteri para biriminde ödeme (#424, #426): teklif alınır, ödeme `quoteId` ve teklifin para birimiyle başlatılır.
+ * Teklif süresi dolduysa / sepet değiştiyse bir kez yeni teklif alınır. Mağaza müşteri para birimini kapattıysa
+ * (`customer_currency_not_allowed`) ödeme teklifsiz, mağaza para biriminde başlatılır (`customerCurrencyDisabled`).
+ * Diğer hatalar olduğu gibi fırlatılır.
+ */
+export async function payWithQuote<T extends Record<string, any>>(
+  getQuote: () => Promise<PresentmentQuote>,
+  pay: (quote: PresentmentQuote | null) => Promise<T>
+): Promise<T & { customerCurrencyDisabled: boolean }> {
+  const inStoreCurrency = async () => ({ ...(await pay(null)), customerCurrencyDisabled: true });
+  for (let attempt = 0; ; attempt++) {
+    let quote: PresentmentQuote;
+    try {
+      quote = await getQuote();
+    } catch (err) {
+      if (errorType(err) === PaymentErrorType.CUSTOMER_CURRENCY_NOT_ALLOWED) return inStoreCurrency();
+      throw err;
+    }
+    try {
+      return { ...(await pay(quote)), customerCurrencyDisabled: false };
+    } catch (err) {
+      const type = errorType(err);
+      if (type === PaymentErrorType.CUSTOMER_CURRENCY_NOT_ALLOWED) return inStoreCurrency();
+      if (attempt === 0 && type && QUOTE_RETRY_ERRORS.includes(type)) continue;
+      throw err;
+    }
+  }
 }
 
 const DELIVERY_STATES = ['pending', 'delivered', 'failed', 'refunded'] as const;
@@ -191,18 +235,57 @@ export class PaymentsModule {
    */
   public async initiate(
     data: InitiatePaymentDto | (Omit<InitiatePaymentDto, 'providerId'> & { provider?: string; providerId?: string }),
-    options: { legalTerms?: LegalTermsConsent } = {}
+    options: { legalTerms?: LegalTermsConsent } & CustomerCurrencyOptions = {}
   ): Promise<InitiatePaymentResponse> {
-    const payload = {
-      ...data,
-      providerId: (data as any).providerId || (data as any).provider,
+    const send = async (quote: PresentmentQuote | null) => {
+      const payload: Record<string, any> = {
+        ...data,
+        providerId: (data as any).providerId || (data as any).provider,
+      };
+      if (quote) {
+        payload.quoteId = quote.quoteId;
+        payload.currency = quote.currency;
+      } else if (options.useCustomerCurrency) {
+        // Teklifsiz ödeme mağaza para biriminde: para birimini sunucu belirler
+        delete payload.quoteId;
+        delete payload.currency;
+      }
+      const raw = await this.http.post<InitiatePaymentResponse>('/payment/initiate', payload, {
+        headers: legalTermsHeaders(options.legalTerms),
+      });
+      return normalizePaymentResponse(raw, this.options.stripePublishableKey);
     };
-    const raw = await this.http.post<InitiatePaymentResponse>('/payment/initiate', payload, {
-      headers: legalTermsHeaders(options.legalTerms),
-    });
-    const response = normalizePaymentResponse(raw, this.options.stripePublishableKey);
+
+    const response: InitiatePaymentResponse = options.useCustomerCurrency
+      ? await payWithQuote(
+          () =>
+            this.quote({
+              websiteId: data.websiteId,
+              kind: 'top_up',
+              amount: data.amount,
+              currency: options.customerCurrency,
+            }),
+          send
+        )
+      : await send(null);
     this.events.emit('payment:initiated', response);
     return response;
+  }
+
+  /**
+   * Kilitli kur teklifi (~30 dk): tutar mağaza para biriminde hesaplanır, müşterinin para birimini sunucu belirler
+   * (`currency` yalnızca öneridir). Ödeme `quoteId` ile başlatılır. Oturum gerektirir.
+   * Mağaza müşteri para birimini kapattıysa 400 `customer_currency_not_allowed`.
+   * POST /payment/quote
+   */
+  public async quote(data: PresentmentQuoteRequest): Promise<PresentmentQuote> {
+    const payload: Record<string, any> = { ...data };
+    const websiteId = data.websiteId || this.options.websiteId;
+    if (websiteId) payload.websiteId = websiteId;
+    for (const key of Object.keys(payload)) if (payload[key] === undefined) delete payload[key];
+    const quote = await this.http.post<PresentmentQuote>('/payment/quote', payload);
+    this.events.emit('payment:quoted', quote);
+    return quote;
   }
 
   /**

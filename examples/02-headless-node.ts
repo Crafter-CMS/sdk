@@ -7,7 +7,7 @@
  * Run with: npx tsx examples/02-headless-node.ts
  */
 
-import { Crafter, CrafterError } from '../src';
+import { Crafter, CrafterError, formatMoney } from '../src';
 
 async function main() {
   console.log('🚀 Crafter SDK Headless Direct Mode Başlatılıyor...\n');
@@ -34,10 +34,11 @@ async function main() {
     const categories = await crafter.store.getCategories();
     console.log(`   - Toplam Kategori Sayısı: ${categories.length}`);
 
+    const { currency } = await crafter.website.getInfo(); // mağaza para birimi
     const products = await crafter.store.getProducts();
     console.log(`   - Toplam Ürün Sayısı: ${products.length}`);
     products.slice(0, 3).forEach((p) => {
-      console.log(`     * [${p.name}] - Fiyat: ${p.price} TL (Stok: ${p.stock === -1 ? 'Sınırsız' : p.stock})`);
+      console.log(`     * [${p.name}] - Fiyat: ${formatMoney(p.price, currency)} (Stok: ${p.stock === -1 ? 'Sınırsız' : p.stock})`);
     });
     console.log();
 

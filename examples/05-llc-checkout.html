@@ -61,7 +61,6 @@
     // --- Yapılandırma (örnek değerler) ---
     const WEBSITE_ID = 'your-website-id';
     const CART = [{ productId: 'demo-product-id', quantity: 1 }];
-    const CURRENCY = 'USD'; // mağaza para birimi
 
     const crafter = new Crafter({
       // Backend publishable key döndürmüyorsa buradan verilir (gizli değildir)
@@ -69,7 +68,7 @@
     });
 
     const $ = (id) => document.getElementById(id);
-    const fmt = (n, c) => new Intl.NumberFormat(undefined, { style: 'currency', currency: c }).format(n);
+    const fmt = (n, c) => Crafter.utils.formatMoney(n, c);
     const RESULT_TEXT = {
       success: 'Ödeme alındı, siparişin teslim edildi.',
       processing: 'Ödeme alındı, teslimat sürüyor.',
@@ -107,6 +106,8 @@
         }
       }
       rows.push(`<div class="row total"><span>Toplam</span><span>${fmt(session.amount, session.currency)}</span></div>`);
+      const p = session.presentment; // müşteri para biriminde ödemede mağaza tutarı
+      if (p) rows.push(`<div class="row"><span>Mağaza tutarı</span><span>${fmt(p.storeAmount, p.storeCurrency)}</span></div>`);
       $('summary').innerHTML = rows.join('');
     }
 
@@ -174,13 +175,13 @@
             websiteId: WEBSITE_ID,
             providerId: provider.id,
             provider: 'CrafterPayments',
-            currency: CURRENCY,
             items: CART,
             user: { name: $('name').value.trim(), email: $('email').value.trim(), address: country.selectedOptions[0].text },
             billingCountry: country.value,
             ...(['US', 'CA'].includes(country.value) ? { billingPostalCode: $('postal').value.trim() } : {}),
           },
-          { legalTerms: { version: 'example-terms-v1' } }
+          // Müşteri para biriminde ödeme: kilitli teklif alınır; kapalıysa mağaza para biriminde ödenir
+          { legalTerms: { version: 'example-terms-v1' }, useCustomerCurrency: true }
         );
 
         if (res.delivered) return showResult('success'); // bakiyeyle ödendi
