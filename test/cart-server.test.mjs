@@ -2,7 +2,17 @@
 // sinyal ve hata eşlemesi. Derlenmiş paketi (dist) test eder. Bütün değerler sentetiktir.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { Crafter, CrafterError, CART_STORAGE_KEY, CART_COUPON_KEY, CART_SYNC_KEY } from '../dist/index.mjs';
+import {
+  Crafter,
+  CrafterError,
+  CrafterCouponError,
+  CouponErrorType,
+  COUPON_ERROR_TYPES,
+  isCouponError,
+  CART_STORAGE_KEY,
+  CART_COUPON_KEY,
+  CART_SYNC_KEY,
+} from '../dist/index.mjs';
 
 class FakeStorage {
   constructor() { this.map = new Map(); }
@@ -16,7 +26,7 @@ let routes;
 let domEvents;
 
 const context = {
-  sdkVersion: '1.5.0',
+  sdkVersion: '1.5.1',
   websiteId: 'site-1',
   apiBase: '/api/storefront',
   locale: 'de',
@@ -256,3 +266,184 @@ test('açık store verilirse bağlam olsa da localStorage deposu kullanılır (g
   assert.equal(JSON.parse(storage.getItem(CART_STORAGE_KEY))[0].id, 'p1');
   assert.equal(calls.length, 0);
 });
+
+// ===================== Kupon (#476) =====================
+
+test('kupon alanları CartState içinde döner; eski storefront yanıtında varsayılanlar', async () => {
+  install();
+  routes['GET /cart.js'] = [
+    {
+      body: cartBody([line('p1', 2, 50)], {
+        coupon: 'YUZDE10',
+        discount: 10,
+        total: 90,
+        couponDetails: { code: 'YUZDE10', type: 'percentage', value: 10, freeProductId: null },
+        couponRemoved: null,
+      }),
+    },
+    { body: cartBody([line('p1', 1, 20)], { couponRemoved: { code: 'MIN500', reason: 'coupon_cart_total_below_minimum' } }) },
+    { body: cartBody([line('p1', 3, 10)]) },
+  ];
+  const crafter = new Crafter({ context });
+  let cart = await crafter.cart.get();
+  assert.equal(cart.discount, 10);
+  assert.equal(cart.total, 90);
+  assert.deepEqual(cart.couponDetails, { code: 'YUZDE10', type: 'percentage', value: 10, freeProductId: null });
+  assert.equal(cart.couponRemoved, null);
+
+  cart = await crafter.cart.get();
+  assert.equal(cart.coupon, null);
+  assert.deepEqual(cart.couponRemoved, { code: 'MIN500', reason: 'coupon_cart_total_below_minimum' });
+  assert.equal(cart.couponDetails, null);
+
+  // discount / total göndermeyen yanıt: indirim 0, toplam ara toplam
+  cart = await crafter.cart.get();
+  assert.equal(cart.discount, 0);
+  assert.equal(cart.total, 30);
+  assert.equal(cart.couponDetails, null);
+  assert.equal(cart.couponRemoved, null);
+});
+
+test('setCoupon: 422 ret CrafterCouponError (type, message, details) olarak döner, olay yayılmaz', async () => {
+  install();
+  routes['POST /cart/coupon.js'] = [
+    {
+      status: 422,
+      body: { success: false, type: 'coupon_cart_total_below_minimum', message: 'Sepet tutarı en az 500 olmalı', details: { minCartValue: 500 } },
+    },
+    { status: 422, body: { success: false, type: 'coupon_not_found', message: 'Kupon bulunamadı' } },
+    {
+      body: cartBody([line('p1', 1, 100)], {
+        coupon: 'SABIT20',
+        discount: 20,
+        total: 80,
+        couponDetails: { code: 'SABIT20', type: 'fixed', value: 20, freeProductId: null },
+      }),
+    },
+  ];
+  const crafter = new Crafter({ context });
+  await assert.rejects(() => crafter.cart.setCoupon('MIN500'), (error) => {
+    assert.ok(error instanceof CrafterError);
+    assert.ok(error instanceof CrafterCouponError);
+    assert.ok(isCouponError(error));
+    assert.equal(error.statusCode, 422);
+    assert.equal(error.type, CouponErrorType.CART_TOTAL_BELOW_MINIMUM);
+    assert.equal(error.message, 'Sepet tutarı en az 500 olmalı');
+    assert.equal(error.details.minCartValue, 500);
+    assert.equal(error.minCartValue, 500);
+    return true;
+  });
+  await assert.rejects(() => crafter.cart.setCoupon('YOK'), (error) => {
+    assert.ok(isCouponError(error));
+    assert.equal(error.type, 'coupon_not_found');
+    assert.equal(error.message, 'Kupon bulunamadı');
+    assert.equal(error.minCartValue, null);
+    return true;
+  });
+  assert.equal(domEvents.length, 0);
+
+  const cart = await crafter.cart.setCoupon('SABIT20');
+  assert.equal(cart.coupon, 'SABIT20');
+  assert.equal(cart.discount, 20);
+  assert.equal(cart.total, 80);
+  assert.equal(cart.couponDetails.type, 'fixed');
+  assert.equal(domEvents.length, 1);
+
+  // Kupon dışı hata isCouponError değildir
+  assert.equal(isCouponError(new CrafterError({ statusCode: 422, type: 'cart_full', message: 'x' })), false);
+  assert.ok(COUPON_ERROR_TYPES.includes('coupon_invalid_for_product'));
+});
+
+test('removeCoupon: { code: null } gönderir, kuponsuz sepet döner ve olay yayılır', async () => {
+  install();
+  routes['POST /cart/coupon.js'] = (b) => ({ body: cartBody([line('p1', 1, 40)], { coupon: b.code }) });
+  const crafter = new Crafter({ context });
+  const cart = await crafter.cart.removeCoupon();
+  assert.deepEqual([calls.at(-1).url, calls.at(-1).body], ['/cart/coupon.js', { code: null }]);
+  assert.equal(cart.coupon, null);
+  assert.equal(cart.discount, 0);
+  assert.equal(cart.total, 40);
+  assert.equal(cart.couponDetails, null);
+  // Boş kod da kaldırır
+  await crafter.cart.setCoupon('   ');
+  assert.deepEqual(calls.at(-1).body, { code: null });
+  assert.equal(domEvents.length, 2);
+});
+
+test('taşıma: geçersiz eski kupon taşınmaz, satırlar korunur, iki anahtar silinir', async () => {
+  const { storage } = install();
+  storage.setItem(CART_STORAGE_KEY, JSON.stringify([{ id: 'p1', price: 99, quantity: 2 }]));
+  storage.setItem(CART_COUPON_KEY, 'ESKI_GECERSIZ');
+  routes['GET /cart.js'] = [{ body: cartBody() }, { body: cartBody([line('p1', 2)]) }];
+  routes['POST /cart/add.js'] = (b) => ({ body: cartBody(b.items.map((i) => line(i.id, i.quantity))) });
+  routes['POST /cart/coupon.js'] = [
+    { status: 422, body: { success: false, type: 'coupon_inactive', message: 'Kupon aktif değil' } },
+  ];
+  const crafter = new Crafter({ context });
+  const cart = await crafter.cart.get();
+  assert.deepEqual(calls.map((c) => `${c.method} ${c.url}`), ['GET /cart.js', 'POST /cart/add.js', 'POST /cart/coupon.js']);
+  assert.equal(cart.itemCount, 2);
+  assert.equal(cart.coupon, null);
+  assert.deepEqual(cart.couponRemoved, { code: 'ESKI_GECERSIZ', reason: 'coupon_inactive' });
+  assert.equal(storage.getItem(CART_STORAGE_KEY), null);
+  assert.equal(storage.getItem(CART_COUPON_KEY), null);
+  assert.ok(Number(storage.getItem(CART_SYNC_KEY)) > 0);
+
+  // Sonraki okuma düz GET; satırlar sunucuda
+  const again = await crafter.cart.get();
+  assert.equal(again.itemCount, 2);
+  assert.equal(again.couponRemoved, null);
+});
+
+test('taşıma: geçerli eski kupon taşınır; kupon adımında sunucu hatası anahtarları korur', async () => {
+  let { storage } = install();
+  storage.setItem(CART_COUPON_KEY, 'GECERLI');
+  routes['GET /cart.js'] = () => ({ body: cartBody([line('p1', 1, 100)]) });
+  routes['POST /cart/coupon.js'] = (b) => ({
+    body: cartBody([line('p1', 1, 100)], {
+      coupon: b.code,
+      discount: 15,
+      total: 85,
+      couponDetails: { code: b.code, type: 'fixed', value: 15, freeProductId: null },
+    }),
+  });
+  let crafter = new Crafter({ context });
+  let cart = await crafter.cart.get();
+  assert.deepEqual(calls.map((c) => `${c.method} ${c.url}`), ['GET /cart.js', 'POST /cart/coupon.js']);
+  assert.deepEqual(calls[1].body, { code: 'GECERLI' });
+  assert.equal(cart.coupon, 'GECERLI');
+  assert.equal(cart.total, 85);
+  assert.equal(storage.getItem(CART_COUPON_KEY), null);
+
+  ({ storage } = install());
+  storage.setItem(CART_STORAGE_KEY, JSON.stringify([{ id: 'p1', price: 1, quantity: 1 }]));
+  storage.setItem(CART_COUPON_KEY, 'GECERLI');
+  routes['GET /cart.js'] = () => ({ body: cartBody() });
+  routes['POST /cart/add.js'] = (b) => ({ body: cartBody(b.items.map((i) => line(i.id, i.quantity))) });
+  routes['POST /cart/coupon.js'] = [{ status: 503, body: { success: false, type: 'cart_unavailable', message: 'x' } }];
+  crafter = new Crafter({ context });
+  cart = await crafter.cart.get();
+  assert.ok(storage.getItem(CART_STORAGE_KEY));
+  assert.equal(storage.getItem(CART_COUPON_KEY), 'GECERLI');
+});
+
+test('localStorage sepeti: indirim 0, toplam ara toplam, couponDetails null', async () => {
+  install();
+  const crafter = new Crafter();
+  assert.equal(crafter.cart.isServerBacked, false);
+  let cart = await crafter.cart.add({ id: 'p1', price: 25 }, 2);
+  cart = await crafter.cart.setCoupon('HERHANGI');
+  assert.equal(cart.coupon, 'HERHANGI');
+  assert.equal(cart.subtotal, 50);
+  assert.equal(cart.discount, 0);
+  assert.equal(cart.total, 50);
+  assert.equal(cart.couponDetails, null);
+  assert.equal(cart.couponRemoved, null);
+  cart = await crafter.cart.removeCoupon();
+  assert.equal(cart.coupon, null);
+  assert.equal(storage().getItem(CART_COUPON_KEY), null);
+});
+
+function storage() {
+  return globalThis.localStorage;
+}
