@@ -26,7 +26,13 @@ export interface CrafterPageContext {
   /** Seçicideki para birimleri */
   currencies?: string[];
   /** Platform adresleri; checkout dil önekiyle çalışmaz, dili Referer'dan okur */
-  routes?: { cart?: string; checkout?: string; localization?: string };
+  routes?: {
+    cart?: string;
+    checkout?: string;
+    localization?: string;
+    /** Storefront sepet uçlarının kökü (#434), ör. '/cart' → `/cart.js`, `/cart/add.js`. Yoksa sepet localStorage'da. */
+    cartApi?: string;
+  };
 }
 
 export const CONTEXT_GLOBAL = '__CRAFTER_CONTEXT__';

@@ -10,18 +10,21 @@ import {
   payWithQuote,
 } from './payments';
 import { CartStore, LocalStorageCartStore, normalizeLines, StoredCartLine } from './cart-store';
+import { CartAdjustedNote, CartRemovedNote, ServerCartClient, ServerCartResponse } from './cart-server';
 import { DomEvents } from '../core/dom-events';
 
 /** Sepete eklenecek ürün; tema genelde `data-*` özniteliklerinden verir */
 export interface CartAddInput {
   id: string | number;
   name?: string;
-  /** Birim fiyat, mağaza para biriminde */
+  /** Birim fiyat, mağaza para biriminde. Storefront sepetinde gönderilmez: fiyatı sunucu hesaplar. */
   price?: number | string;
   discountType?: string | null;
   discountValue?: number | string | null;
   image?: string | null;
   images?: string[];
+  /** Varyant / seçenekler (storefront sepeti) */
+  options?: Record<string, string> | null;
 }
 
 /** Sepet satırı: depodaki alanlar + hesaplananlar (mağaza para biriminde) */
@@ -42,11 +45,36 @@ export interface CartState {
   /** Mağaza para birimi (sayfa bağlamından); bilinmiyorsa boş */
   currency: string;
   coupon: string | null;
+  /** Storefront sepeti (#434): satıştan kalkan / tükenen ürün düştüyse bir kez bildirilir */
+  removed?: CartRemovedNote[];
+  /** Storefront sepeti (#434): adet stoğa göre düşürüldüyse bir kez bildirilir */
+  adjusted?: CartAdjustedNote[];
+}
+
+/** Sepetin işlemleri; `crafter.cart` bunlara devreder (localStorage ya da storefront sunucusu) */
+export interface CartBackend {
+  get(): Promise<CartState>;
+  add(product: CartAddInput, quantity: number): Promise<CartState>;
+  update(id: string, quantity: number): Promise<CartState>;
+  remove(id: string): Promise<CartState>;
+  clear(): Promise<CartState>;
+  setCoupon(code: string | null): Promise<CartState>;
+  /** Başka sekmede değişince çağrılır; aboneliği kaldıran fonksiyon döner */
+  subscribe(onChange: () => void): () => void;
 }
 
 export interface CartModuleDeps {
-  /** Sepet deposu; varsayılan localStorage ('cart'). Hibrit sepet (#434) sunucu deposu verir. */
+  /** Sepet deposu (localStorage 'cart' biçimi). Verilirse her zaman bu depo kullanılır. */
   store?: CartStore;
+  /**
+   * Storefront sepet uçları (#434): bağlamın `routes.cartApi` değeri (ör. '/cart'). Verilirse sepet sunucudadır
+   * (ziyaretçide imzalı çerez, giriş yapınca hesap); yoksa localStorage.
+   */
+  cartApi?: string | null;
+  /** Storefront sepetinde ürün adlarının dili */
+  locale?: () => string | undefined;
+  /** Testler için */
+  fetchImpl?: typeof fetch;
   dom?: DomEvents;
   storeCurrency?: () => string;
 }
@@ -63,31 +91,10 @@ export function discountedUnitPrice(line: Pick<StoredCartLine, 'price' | 'discou
 
 const MAX_QUANTITY = 999;
 
-export class CartModule {
-  private payments: PaymentsModule;
-  private store: CartStore;
-  private dom: DomEvents;
-  private storeCurrency: () => string;
+/** localStorage sepeti (#447): headless kullanım ve sepet uçları olmayan sayfalar */
+export class LocalCartBackend implements CartBackend {
+  constructor(private store: CartStore, private storeCurrency: () => string) {}
 
-  constructor(
-    private http: HttpClient,
-    private events: EventEmitter,
-    private options: PaymentsModuleOptions = {},
-    deps: CartModuleDeps = {}
-  ) {
-    this.payments = new PaymentsModule(http, events, options);
-    this.store = deps.store ?? new LocalStorageCartStore();
-    this.dom = deps.dom ?? new DomEvents(events);
-    this.storeCurrency = deps.storeCurrency ?? (() => '');
-    // Başka sekmedeki değişiklik bu sayfada da `cart:updated` yayar
-    this.store.subscribe(() => {
-      void this.get().then((cart) => this.dom.emit('cart:updated', cart));
-    });
-  }
-
-  // ===================== Sepet içeriği (#447) =====================
-
-  /** Sepetin güncel hali */
   public async get(): Promise<CartState> {
     const [lines, coupon] = await Promise.all([this.store.read(), this.store.readCoupon()]);
     const items: CartLine[] = lines.map((line) => {
@@ -103,17 +110,12 @@ export class CartModule {
     };
   }
 
-  /** Ürünü ekler; sepette varsa adedi artar. `crafter:cart:updated` yayar. */
-  public async add(product: CartAddInput, quantity = 1): Promise<CartState> {
-    if (product?.id === undefined || product.id === null || product.id === '') {
-      throw new TypeError('[Crafter SDK] cart.add: ürün id gerekli');
-    }
+  public async add(product: CartAddInput, quantity: number): Promise<CartState> {
     const id = String(product.id);
-    const amount = Math.max(1, Math.floor(Number(quantity) || 1));
     const lines = await this.store.read();
     const existing = lines.find((line) => line.id === id);
     if (existing) {
-      existing.quantity = Math.min(MAX_QUANTITY, existing.quantity + amount);
+      existing.quantity = Math.min(MAX_QUANTITY, existing.quantity + quantity);
     } else {
       const images = Array.isArray(product.images) ? product.images.filter(Boolean) : product.image ? [product.image] : [];
       lines.push(
@@ -122,7 +124,7 @@ export class CartModule {
             id,
             name: product.name ?? '',
             price: Number(product.price) || 0,
-            quantity: Math.min(MAX_QUANTITY, amount),
+            quantity: Math.min(MAX_QUANTITY, quantity),
             discountType: product.discountType || null,
             discountValue: product.discountValue ?? null,
             images,
@@ -133,36 +135,164 @@ export class CartModule {
     return this.commit(lines);
   }
 
-  /** Satırın adedini ayarlar; 0 ya da altı satırı siler */
-  public async update(id: string | number, quantity: number): Promise<CartState> {
-    const key = String(id);
-    const next = Math.floor(Number(quantity) || 0);
+  public async update(id: string, quantity: number): Promise<CartState> {
     const lines = (await this.store.read())
-      .map((line) => (line.id === key ? { ...line, quantity: Math.min(MAX_QUANTITY, next) } : line))
+      .map((line) => (line.id === id ? { ...line, quantity: Math.min(MAX_QUANTITY, quantity) } : line))
       .filter((line) => line.quantity > 0);
     return this.commit(lines);
   }
 
-  public async remove(id: string | number): Promise<CartState> {
-    const key = String(id);
-    return this.commit((await this.store.read()).filter((line) => line.id !== key));
+  public async remove(id: string): Promise<CartState> {
+    return this.commit((await this.store.read()).filter((line) => line.id !== id));
   }
 
-  /** Sepeti ve kuponu boşaltır */
   public async clear(): Promise<CartState> {
     await this.store.writeCoupon(null);
     return this.commit([]);
   }
 
-  /** Checkout'ta uygulanacak kupon kodu; null kaldırır */
   public async setCoupon(code: string | null): Promise<CartState> {
-    await this.store.writeCoupon(code ? String(code).trim() || null : null);
+    await this.store.writeCoupon(code);
     return this.commit(await this.store.read());
+  }
+
+  public subscribe(onChange: () => void): () => void {
+    return this.store.subscribe(onChange);
   }
 
   private async commit(lines: StoredCartLine[]): Promise<CartState> {
     await this.store.write(lines);
-    const cart = await this.get();
+    return this.get();
+  }
+}
+
+/** Sunucu yanıtı → `CartState` (tutarlar mağaza para biriminde, sunucu hesaplar) */
+export function cartStateFromServer(cart: ServerCartResponse, fallbackCurrency = ''): CartState {
+  return {
+    items: cart.items.map((line) => ({
+      ...line,
+      image: line.image ?? line.images?.[0] ?? null,
+      images: line.images ?? [],
+    })) as CartLine[],
+    itemCount: cart.itemCount,
+    subtotal: cart.subtotal,
+    currency: cart.currency || fallbackCurrency,
+    coupon: cart.coupon,
+    removed: cart.removed ?? [],
+    adjusted: cart.adjusted ?? [],
+  };
+}
+
+/** Storefront sepeti (#434): `/cart.js` ve `/cart/*.js` uçları; fiyat gönderilmez */
+export class ServerCartBackend implements CartBackend {
+  constructor(private client: ServerCartClient, private storeCurrency: () => string) {}
+
+  public async get(): Promise<CartState> {
+    return this.state(await this.client.get());
+  }
+
+  public async add(product: CartAddInput, quantity: number): Promise<CartState> {
+    return this.state(await this.client.add(String(product.id), quantity, product.options ?? null));
+  }
+
+  public async update(id: string, quantity: number): Promise<CartState> {
+    return this.state(await this.client.change(id, Math.max(0, quantity)));
+  }
+
+  public async remove(id: string): Promise<CartState> {
+    return this.state(await this.client.change(id, 0));
+  }
+
+  public async clear(): Promise<CartState> {
+    return this.state(await this.client.clear());
+  }
+
+  public async setCoupon(code: string | null): Promise<CartState> {
+    return this.state(await this.client.setCoupon(code));
+  }
+
+  public subscribe(onChange: () => void): () => void {
+    return this.client.subscribe(onChange);
+  }
+
+  private state(cart: ServerCartResponse): CartState {
+    return cartStateFromServer(cart, this.storeCurrency());
+  }
+}
+
+export class CartModule {
+  private payments: PaymentsModule;
+  private backend: CartBackend;
+  private dom: DomEvents;
+
+  constructor(
+    private http: HttpClient,
+    private events: EventEmitter,
+    private options: PaymentsModuleOptions = {},
+    deps: CartModuleDeps = {}
+  ) {
+    this.payments = new PaymentsModule(http, events, options);
+    this.dom = deps.dom ?? new DomEvents(events);
+    const storeCurrency = deps.storeCurrency ?? (() => '');
+    // Açık depo verildiyse o; storefront bağlamı sepet uçlarını bildiriyorsa sunucu; değilse localStorage
+    this.backend =
+      !deps.store && typeof deps.cartApi === 'string' && deps.cartApi.trim()
+        ? new ServerCartBackend(
+            new ServerCartClient({ cartApi: deps.cartApi.trim(), locale: deps.locale, fetchImpl: deps.fetchImpl }),
+            storeCurrency
+          )
+        : new LocalCartBackend(deps.store ?? new LocalStorageCartStore(), storeCurrency);
+    // Başka sekmedeki değişiklik bu sayfada da `cart:updated` yayar
+    this.backend.subscribe(() => {
+      void this.get()
+        .then((cart) => this.dom.emit('cart:updated', cart))
+        .catch(() => undefined);
+    });
+  }
+
+  /** Sepet sunucuda mı (storefront sepet uçları) */
+  public get isServerBacked(): boolean {
+    return this.backend instanceof ServerCartBackend;
+  }
+
+  // ===================== Sepet içeriği (#447, #434) =====================
+
+  /** Sepetin güncel hali */
+  public async get(): Promise<CartState> {
+    return this.backend.get();
+  }
+
+  /** Ürünü ekler; sepette varsa adedi artar. `crafter:cart:updated` yayar. */
+  public async add(product: CartAddInput, quantity = 1): Promise<CartState> {
+    if (product?.id === undefined || product.id === null || product.id === '') {
+      throw new TypeError('[Crafter SDK] cart.add: ürün id gerekli');
+    }
+    const amount = Math.min(MAX_QUANTITY, Math.max(1, Math.floor(Number(quantity) || 1)));
+    return this.emit(this.backend.add(product, amount));
+  }
+
+  /** Satırın adedini ayarlar; 0 ya da altı satırı siler */
+  public async update(id: string | number, quantity: number): Promise<CartState> {
+    const next = Math.min(MAX_QUANTITY, Math.floor(Number(quantity) || 0));
+    return this.emit(this.backend.update(String(id), next));
+  }
+
+  public async remove(id: string | number): Promise<CartState> {
+    return this.emit(this.backend.remove(String(id)));
+  }
+
+  /** Sepeti ve kuponu boşaltır */
+  public async clear(): Promise<CartState> {
+    return this.emit(this.backend.clear());
+  }
+
+  /** Checkout'ta uygulanacak kupon kodu; null kaldırır */
+  public async setCoupon(code: string | null): Promise<CartState> {
+    return this.emit(this.backend.setCoupon(code ? String(code).trim() || null : null));
+  }
+
+  private async emit(pending: Promise<CartState>): Promise<CartState> {
+    const cart = await pending;
     this.dom.emit('cart:updated', cart);
     return cart;
   }

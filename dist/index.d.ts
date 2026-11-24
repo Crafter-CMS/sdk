@@ -164,9 +164,9 @@ declare class PaymentsModule {
 }
 
 /**
- * Sepet deposu (#447). Bugün tarayıcıda: localStorage 'cart' ve 'crafter_cart_coupon' anahtarları, storefront
- * checkout'unun (`src/app/checkout/cart.ts`) okuduğu biçimle aynı. Hibrit sepet (#434) gelince sunucu deposu bu
- * arayüzü uygular; `crafter.cart` API'si değişmez (bütün metotlar zaten Promise döner).
+ * localStorage sepet deposu (#447): 'cart' ve 'crafter_cart_coupon' anahtarları. Headless kullanımda ve sepet uçları
+ * olmayan sayfalarda kullanılır. Storefront içinde sepet sunucudadır (#434, `cart-server.ts`); bu anahtarlar oradan
+ * bir kez taşınıp silinir.
  */
 /** Depodaki satır: checkout'un okuduğu alanlar */
 interface StoredCartLine {
@@ -201,6 +201,105 @@ declare class LocalStorageCartStore implements CartStore {
 }
 
 /**
+ * Hibrit sepet (#434): storefront'un sepet uçları. Ziyaretçide sepet storefront'un imzalı çerezinde, giriş yapmış
+ * müşteride sunucuda tutulur; SDK iki modu ayırt etmez. Uçlar aynı kökenli ve çerezlidir (`credentials: 'same-origin'`).
+ * Fiyat gönderilmez: sunucu güncel üründen hesaplar.
+ *   GET  /cart.js
+ *   POST /cart/add.js     { id, quantity, options? } | { items: [{ id, quantity }] }
+ *   POST /cart/change.js  { id, quantity }   (0 siler; id ürün id'si ya da satır anahtarı)
+ *   POST /cart/clear.js
+ *   POST /cart/coupon.js  { code | null }
+ */
+/** Sunucunun döndürdüğü satır */
+interface ServerCartLine {
+    key?: string;
+    id: string;
+    productId?: string;
+    name: string;
+    slug?: string;
+    url?: string;
+    price: number;
+    unitPrice: number;
+    discountType?: string | null;
+    discountValue?: number | null;
+    quantity: number;
+    lineTotal: number;
+    images?: string[];
+    image?: string | null;
+    stock?: number;
+    options?: Record<string, string> | null;
+    [key: string]: unknown;
+}
+/** Sepetten düşen satır: `not_found`, `unavailable`, `out_of_stock`, `cart_full` */
+interface CartRemovedNote {
+    productId: string;
+    key?: string;
+    name?: string | null;
+    quantity: number;
+    reason: string;
+}
+/** Adedi düşürülen satır: `stock_limit`, `max_quantity` */
+interface CartAdjustedNote {
+    productId: string;
+    key?: string;
+    name?: string | null;
+    from: number;
+    to: number;
+    reason: string;
+}
+interface ServerCartResponse {
+    items: ServerCartLine[];
+    itemCount: number;
+    subtotal: number;
+    currency: string;
+    coupon: string | null;
+    removed?: CartRemovedNote[];
+    adjusted?: CartAdjustedNote[];
+    mode?: 'guest' | 'customer';
+}
+interface ServerCartClientOptions {
+    /** Uçların kökü (bağlamın `routes.cartApi` değeri, ör. '/cart') */
+    cartApi: string;
+    /** Ürün adlarının dili (`X-Crafter-Locale`) */
+    locale?: () => string | undefined;
+    fetchImpl?: typeof fetch;
+}
+/** Başka sekmeye "sepet değişti" sinyali (yalnızca zaman damgası) */
+declare const CART_SYNC_KEY = "crafter_cart_sync";
+/** Yanıtı tip güvenli biçime getirir; bozuk satırlar atılır */
+declare function normalizeServerCart(raw: any): ServerCartResponse;
+/**
+ * Storefront sepet uçlarının istemcisi. İlk işlemden önce eski localStorage sepetini bir kez sunucuya taşır
+ * (`migrate`); her değişiklikten sonra diğer sekmelere `crafter_cart_sync` sinyali yazar.
+ */
+declare class ServerCartClient {
+    private readonly options;
+    private migration;
+    private migrationConsumed;
+    private readonly base;
+    constructor(options: ServerCartClientOptions);
+    get(): Promise<ServerCartResponse>;
+    add(id: string, quantity: number, options?: Record<string, string> | null): Promise<ServerCartResponse>;
+    change(id: string, quantity: number): Promise<ServerCartResponse>;
+    clear(): Promise<ServerCartResponse>;
+    setCoupon(code: string | null): Promise<ServerCartResponse>;
+    /** Başka sekmede değişince çağrılır; aboneliği kaldıran fonksiyon döner */
+    subscribe(onChange: () => void): () => void;
+    /**
+     * Eski temaların localStorage sepeti (`cart`, `crafter_cart_coupon`) sayfa başına bir kez taşınır: sunucu sepeti
+     * boşsa satırlar (yalnızca id + adet), kupon yoksa kupon gönderilir; ardından anahtarlar silinir. Sunucu sepeti
+     * doluysa sunucudaki esas alınır ve anahtarlar yine silinir. Ağ / sunucu hatasında localStorage korunur (sonraki
+     * sayfada tekrar denenir); istek reddedilirse (4xx) kayıt bozuk sayılır ve silinir.
+     * Dönüş: taşıma sırasında okunan son sepet (yoksa null).
+     */
+    migrate(): Promise<ServerCartResponse | null>;
+    private runMigration;
+    private mutate;
+    private ping;
+    private request;
+}
+
+/**
  * Tema olayları (#447): SDK değişiklikleri hem kendi olay yoluna (`crafter.on('cart:updated')`) hem de
  * `document` üzerine `crafter:<ad>` CustomEvent olarak yayar. Temalar SDK örneğini beklemeden dinleyebilir:
  *   document.addEventListener('crafter:cart:updated', (e) => e.detail.itemCount)
@@ -229,12 +328,14 @@ declare class DomEvents {
 interface CartAddInput {
     id: string | number;
     name?: string;
-    /** Birim fiyat, mağaza para biriminde */
+    /** Birim fiyat, mağaza para biriminde. Storefront sepetinde gönderilmez: fiyatı sunucu hesaplar. */
     price?: number | string;
     discountType?: string | null;
     discountValue?: number | string | null;
     image?: string | null;
     images?: string[];
+    /** Varyant / seçenekler (storefront sepeti) */
+    options?: Record<string, string> | null;
 }
 /** Sepet satırı: depodaki alanlar + hesaplananlar (mağaza para biriminde) */
 interface CartLine extends StoredCartLine {
@@ -253,24 +354,79 @@ interface CartState {
     /** Mağaza para birimi (sayfa bağlamından); bilinmiyorsa boş */
     currency: string;
     coupon: string | null;
+    /** Storefront sepeti (#434): satıştan kalkan / tükenen ürün düştüyse bir kez bildirilir */
+    removed?: CartRemovedNote[];
+    /** Storefront sepeti (#434): adet stoğa göre düşürüldüyse bir kez bildirilir */
+    adjusted?: CartAdjustedNote[];
+}
+/** Sepetin işlemleri; `crafter.cart` bunlara devreder (localStorage ya da storefront sunucusu) */
+interface CartBackend {
+    get(): Promise<CartState>;
+    add(product: CartAddInput, quantity: number): Promise<CartState>;
+    update(id: string, quantity: number): Promise<CartState>;
+    remove(id: string): Promise<CartState>;
+    clear(): Promise<CartState>;
+    setCoupon(code: string | null): Promise<CartState>;
+    /** Başka sekmede değişince çağrılır; aboneliği kaldıran fonksiyon döner */
+    subscribe(onChange: () => void): () => void;
 }
 interface CartModuleDeps {
-    /** Sepet deposu; varsayılan localStorage ('cart'). Hibrit sepet (#434) sunucu deposu verir. */
+    /** Sepet deposu (localStorage 'cart' biçimi). Verilirse her zaman bu depo kullanılır. */
     store?: CartStore;
+    /**
+     * Storefront sepet uçları (#434): bağlamın `routes.cartApi` değeri (ör. '/cart'). Verilirse sepet sunucudadır
+     * (ziyaretçide imzalı çerez, giriş yapınca hesap); yoksa localStorage.
+     */
+    cartApi?: string | null;
+    /** Storefront sepetinde ürün adlarının dili */
+    locale?: () => string | undefined;
+    /** Testler için */
+    fetchImpl?: typeof fetch;
     dom?: DomEvents;
     storeCurrency?: () => string;
 }
 /** İndirim uygulanmış birim fiyat: 'percentage' yüzde, diğer tipler sabit tutar (checkout ile aynı kural) */
 declare function discountedUnitPrice(line: Pick<StoredCartLine, 'price' | 'discountType' | 'discountValue'>): number;
+/** localStorage sepeti (#447): headless kullanım ve sepet uçları olmayan sayfalar */
+declare class LocalCartBackend implements CartBackend {
+    private store;
+    private storeCurrency;
+    constructor(store: CartStore, storeCurrency: () => string);
+    get(): Promise<CartState>;
+    add(product: CartAddInput, quantity: number): Promise<CartState>;
+    update(id: string, quantity: number): Promise<CartState>;
+    remove(id: string): Promise<CartState>;
+    clear(): Promise<CartState>;
+    setCoupon(code: string | null): Promise<CartState>;
+    subscribe(onChange: () => void): () => void;
+    private commit;
+}
+/** Sunucu yanıtı → `CartState` (tutarlar mağaza para biriminde, sunucu hesaplar) */
+declare function cartStateFromServer(cart: ServerCartResponse, fallbackCurrency?: string): CartState;
+/** Storefront sepeti (#434): `/cart.js` ve `/cart/*.js` uçları; fiyat gönderilmez */
+declare class ServerCartBackend implements CartBackend {
+    private client;
+    private storeCurrency;
+    constructor(client: ServerCartClient, storeCurrency: () => string);
+    get(): Promise<CartState>;
+    add(product: CartAddInput, quantity: number): Promise<CartState>;
+    update(id: string, quantity: number): Promise<CartState>;
+    remove(id: string): Promise<CartState>;
+    clear(): Promise<CartState>;
+    setCoupon(code: string | null): Promise<CartState>;
+    subscribe(onChange: () => void): () => void;
+    private state;
+}
 declare class CartModule {
     private http;
     private events;
     private options;
     private payments;
-    private store;
+    private backend;
     private dom;
-    private storeCurrency;
     constructor(http: HttpClient, events: EventEmitter, options?: PaymentsModuleOptions, deps?: CartModuleDeps);
+    /** Sepet sunucuda mı (storefront sepet uçları) */
+    get isServerBacked(): boolean;
     /** Sepetin güncel hali */
     get(): Promise<CartState>;
     /** Ürünü ekler; sepette varsa adedi artar. `crafter:cart:updated` yayar. */
@@ -282,7 +438,7 @@ declare class CartModule {
     clear(): Promise<CartState>;
     /** Checkout'ta uygulanacak kupon kodu; null kaldırır */
     setCoupon(code: string | null): Promise<CartState>;
-    private commit;
+    private emit;
     /**
      * Complete purchase using user balance.
      * POST /marketplace/purchase
@@ -354,6 +510,8 @@ interface CrafterPageContext {
         cart?: string;
         checkout?: string;
         localization?: string;
+        /** Storefront sepet uçlarının kökü (#434), ör. '/cart' → `/cart.js`, `/cart/add.js`. Yoksa sepet localStorage'da. */
+        cartApi?: string;
     };
 }
 declare const CONTEXT_GLOBAL = "__CRAFTER_CONTEXT__";
@@ -2577,7 +2735,7 @@ declare function isBalanceTopUpError(err: unknown): err is CrafterBalanceTopUpEr
 declare function isPaymentProviderError(err: unknown): err is CrafterPaymentProviderError;
 
 /** Paket sürümü; package.json ile aynı tutulur (test denetler) */
-declare const SDK_VERSION = "1.4.0";
+declare const SDK_VERSION = "1.5.0";
 
 /** `crafter.checkout()` seçenekleri */
 interface CheckoutNavigateOptions {
@@ -2589,8 +2747,8 @@ interface CheckoutNavigateOptions {
     navigate?: boolean;
 }
 declare class Crafter {
-    static readonly version = "1.4.0";
-    readonly version = "1.4.0";
+    static readonly version = "1.5.0";
+    readonly version = "1.5.0";
     readonly config: CrafterConfig;
     readonly http: HttpClient;
     readonly events: EventEmitter;
@@ -2691,4 +2849,4 @@ declare class Crafter {
 
 // @ts-ignore
 export = Crafter;
-export { type Auth2FaRequiredResponse, type AuthEmailVerificationRequiredResponse, AuthModule, type AuthResponse, type AuthSuccessResponse, type BalanceTopUpLimits, type BalanceTopUpPolicy, type BulkDiscountConfig, CART_COUPON_KEY, CART_STORAGE_KEY, CONTEXT_GLOBAL, type CartAddInput, type CartLine, CartModule, type CartModuleDeps, type CartState, type CartStore, type Category, type ChangePasswordDto, type CheckPaymentResponse, type CheckoutNavigateOptions, type CheckoutPaymentResponse, type ChestItem, ChestModule, type ChestProductSummary, type CouponResponse, CouponsModule, Crafter, type CrafterApiError, CrafterBalanceTopUpError, type CrafterConfig, CrafterError, type CrafterEventMap, type CrafterEventName, CrafterOutOfStockError, type CrafterPageContext, CrafterPaymentProviderError, type CreateReportDto, type CreateTicketDto, CurrenciesModule, type CurrencyConversion, type CustomerCurrencyContext, type CustomerCurrencyMode, type CustomerCurrencyOptions, type CustomerCurrencySource, DOM_EVENTS, type DisableTwoFactorDto, type DiscordStatusData, type DiscordStatusResponse, type DomEventName, DomEvents, EventEmitter, type EventHandler, type ForumCategory, type ForumMessage, type ForumMessageReply, ForumModule, type ForumTopic, type GiftChestItemResponse, type HelpArticleItem, type HelpCategoryItem, type HelpFaqItem, type HelpcenterCategoryDetailResponse, HelpcenterModule, type HelpcenterOverviewResponse, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, type InGameAuthDto, type InitiatePaymentDto, type InitiatePaymentResponse, type InitiatePaymentUser, type LatestPayment, type LatestPurchase, type LatestSignup, type LegalDocuments, LegalModule, type LegalTermsConsent, type LexicalHtmlOptions, type LicenseRecord, type LicenseVerification, LicensesModule, type LightweightBalanceResponse, type LikePostResponse, type LikeTopicResponse, LocalStorageCartStore, type LocalizationChange, LocalizationModule, type LocalizationSetOptions, type LocalizationState, LuckPermsModule, type LuckPermsPermissionNode, type LuckPermsPlayerData, type MarketplaceConfig, type MoneyFormatOptions, MoneyModule, type PageItem, PagesModule, type PaginatedPostsResponse, type PaginatedPunishmentsResponse, type PaymentDeliveryStatus, PaymentErrorType, type PaymentErrorTypeValue, type PaymentOutcome, type PaymentPresentment, type PaymentRecordStatus, type PaymentSessionType, type PaymentStatusResult, type PaymentTaxBreakdown, type PaymentTaxLine, PaymentsModule, type PaymentsModuleOptions, type PostAuthor, type PostItem, type PostQueryDto, PostsModule, type PresentmentQuote, type PresentmentQuoteKind, type PresentmentQuoteRequest, type Product, type PublicDeliveryState, type PublicPaymentProvider, type PunishmentItem, PunishmentsModule, type PurchaseDto, type PurchaseItemDto, type PurchaseResponse, RedeemCodeModule, type ReplyTicketDto, type ReportResponse, type ReportType, ReportsModule, type RequestOptions, type ResetPasswordDto, SDK_VERSION, SearchModule, type SearchResultItem, SectionsModule, type SectionsRenderOptions, type SendBalanceParams, type SendBalanceResponse, SeoModule, type SerializedCodeNode, type SerializedEditorState, type SerializedElementNode, type SerializedHeadingNode, type SerializedHorizontalRuleNode, type SerializedImageNode, type SerializedLexicalNode, type SerializedLinkNode, type SerializedListItemNode, type SerializedListNode, type SerializedQuoteNode, type SerializedRootNode, type SerializedTableCellNode, type SerializedTableNode, type SerializedTableRowNode, type SerializedTextNode, type ServerStatusItem, ServersModule, type SignInDto, type SignUpDto, type SinglePostResponse, type SiteStatistics, type SitemapUrlItem, type StaffFormApplicationResponse, type StaffFormApplicationValue, type StaffFormInput, type StaffFormItem, StaffFormsModule, StatisticsModule, StoreModule, type StoredCartLine, type StripePaymentSession, type Ticket, type TicketCategory, type TicketCategoryDetails, type TicketMessage, type TicketMessageSender, TicketsModule, type TopCreditLoader, type TwoFactorStatusResponse, type TwoFactorValidateDto, type UpdateOwnUserDto, type UseChestItemResponse, type UseRedeemCodeResponse, type UserProfile, type UserRole, UsersModule, VoteModule, type VoteProcessResponse, type VoteProviderItem, type WaitForPaymentOptions, type WallMessage, type WallMessageReply, type WebsiteInfo, WebsiteModule, type WebsitePluginModule, type WebsiteSeoConfig, currencyDigits, discountedUnitPrice, dispatchDomEvent, formatMoney, htmlToLexical, isBalanceTopUpError, isCrafterError, isLexicalFormat, isOutOfStockError, isPaymentProviderError, legalTermsHeaders, lexicalToHtml, lexicalToPlainText, lexicalToText, normalizeLines, normalizePaymentResponse, parsePaymentStatus, parseTaxBreakdown, payWithQuote, readPageContext, stripLocalePrefix, toLexical, topUpMaxAmount };
+export { type Auth2FaRequiredResponse, type AuthEmailVerificationRequiredResponse, AuthModule, type AuthResponse, type AuthSuccessResponse, type BalanceTopUpLimits, type BalanceTopUpPolicy, type BulkDiscountConfig, CART_COUPON_KEY, CART_STORAGE_KEY, CART_SYNC_KEY, CONTEXT_GLOBAL, type CartAddInput, type CartAdjustedNote, type CartBackend, type CartLine, CartModule, type CartModuleDeps, type CartRemovedNote, type CartState, type CartStore, type Category, type ChangePasswordDto, type CheckPaymentResponse, type CheckoutNavigateOptions, type CheckoutPaymentResponse, type ChestItem, ChestModule, type ChestProductSummary, type CouponResponse, CouponsModule, Crafter, type CrafterApiError, CrafterBalanceTopUpError, type CrafterConfig, CrafterError, type CrafterEventMap, type CrafterEventName, CrafterOutOfStockError, type CrafterPageContext, CrafterPaymentProviderError, type CreateReportDto, type CreateTicketDto, CurrenciesModule, type CurrencyConversion, type CustomerCurrencyContext, type CustomerCurrencyMode, type CustomerCurrencyOptions, type CustomerCurrencySource, DOM_EVENTS, type DisableTwoFactorDto, type DiscordStatusData, type DiscordStatusResponse, type DomEventName, DomEvents, EventEmitter, type EventHandler, type ForumCategory, type ForumMessage, type ForumMessageReply, ForumModule, type ForumTopic, type GiftChestItemResponse, type HelpArticleItem, type HelpCategoryItem, type HelpFaqItem, type HelpcenterCategoryDetailResponse, HelpcenterModule, type HelpcenterOverviewResponse, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, type InGameAuthDto, type InitiatePaymentDto, type InitiatePaymentResponse, type InitiatePaymentUser, type LatestPayment, type LatestPurchase, type LatestSignup, type LegalDocuments, LegalModule, type LegalTermsConsent, type LexicalHtmlOptions, type LicenseRecord, type LicenseVerification, LicensesModule, type LightweightBalanceResponse, type LikePostResponse, type LikeTopicResponse, LocalCartBackend, LocalStorageCartStore, type LocalizationChange, LocalizationModule, type LocalizationSetOptions, type LocalizationState, LuckPermsModule, type LuckPermsPermissionNode, type LuckPermsPlayerData, type MarketplaceConfig, type MoneyFormatOptions, MoneyModule, type PageItem, PagesModule, type PaginatedPostsResponse, type PaginatedPunishmentsResponse, type PaymentDeliveryStatus, PaymentErrorType, type PaymentErrorTypeValue, type PaymentOutcome, type PaymentPresentment, type PaymentRecordStatus, type PaymentSessionType, type PaymentStatusResult, type PaymentTaxBreakdown, type PaymentTaxLine, PaymentsModule, type PaymentsModuleOptions, type PostAuthor, type PostItem, type PostQueryDto, PostsModule, type PresentmentQuote, type PresentmentQuoteKind, type PresentmentQuoteRequest, type Product, type PublicDeliveryState, type PublicPaymentProvider, type PunishmentItem, PunishmentsModule, type PurchaseDto, type PurchaseItemDto, type PurchaseResponse, RedeemCodeModule, type ReplyTicketDto, type ReportResponse, type ReportType, ReportsModule, type RequestOptions, type ResetPasswordDto, SDK_VERSION, SearchModule, type SearchResultItem, SectionsModule, type SectionsRenderOptions, type SendBalanceParams, type SendBalanceResponse, SeoModule, type SerializedCodeNode, type SerializedEditorState, type SerializedElementNode, type SerializedHeadingNode, type SerializedHorizontalRuleNode, type SerializedImageNode, type SerializedLexicalNode, type SerializedLinkNode, type SerializedListItemNode, type SerializedListNode, type SerializedQuoteNode, type SerializedRootNode, type SerializedTableCellNode, type SerializedTableNode, type SerializedTableRowNode, type SerializedTextNode, ServerCartBackend, ServerCartClient, type ServerCartClientOptions, type ServerCartLine, type ServerCartResponse, type ServerStatusItem, ServersModule, type SignInDto, type SignUpDto, type SinglePostResponse, type SiteStatistics, type SitemapUrlItem, type StaffFormApplicationResponse, type StaffFormApplicationValue, type StaffFormInput, type StaffFormItem, StaffFormsModule, StatisticsModule, StoreModule, type StoredCartLine, type StripePaymentSession, type Ticket, type TicketCategory, type TicketCategoryDetails, type TicketMessage, type TicketMessageSender, TicketsModule, type TopCreditLoader, type TwoFactorStatusResponse, type TwoFactorValidateDto, type UpdateOwnUserDto, type UseChestItemResponse, type UseRedeemCodeResponse, type UserProfile, type UserRole, UsersModule, VoteModule, type VoteProcessResponse, type VoteProviderItem, type WaitForPaymentOptions, type WallMessage, type WallMessageReply, type WebsiteInfo, WebsiteModule, type WebsitePluginModule, type WebsiteSeoConfig, cartStateFromServer, currencyDigits, discountedUnitPrice, dispatchDomEvent, formatMoney, htmlToLexical, isBalanceTopUpError, isCrafterError, isLexicalFormat, isOutOfStockError, isPaymentProviderError, legalTermsHeaders, lexicalToHtml, lexicalToPlainText, lexicalToText, normalizeLines, normalizePaymentResponse, normalizeServerCart, parsePaymentStatus, parseTaxBreakdown, payWithQuote, readPageContext, stripLocalePrefix, toLexical, topUpMaxAmount };

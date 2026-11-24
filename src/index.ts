@@ -166,9 +166,12 @@ export class Crafter {
     this.users = new UsersModule(this.http, this.events);
     this.store = new StoreModule(this.http, this.events);
     
+    // Storefront sepet uçları (#434) bağlamdan; yoksa (headless, eski storefront) localStorage
     const cartModule = new CartModule(this.http, this.events, this.config, {
       dom: this.dom,
       storeCurrency: () => this.money.storeCurrency,
+      cartApi: this.context?.routes?.cartApi ?? null,
+      locale: () => this.context?.locale,
     });
     this.cart = cartModule;
     this.marketplace = cartModule;
@@ -309,6 +312,7 @@ export * from './modules/money';
 export * from './modules/localization';
 export * from './modules/sections';
 export * from './modules/cart-store';
+export * from './modules/cart-server';
 export * from './core/context';
 export * from './core/dom-events';
 export * from './version';

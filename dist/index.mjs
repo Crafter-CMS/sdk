@@ -1215,6 +1215,195 @@ var LocalStorageCartStore = class {
   }
 };
 
+// src/modules/cart-server.ts
+var CART_SYNC_KEY = "crafter_cart_sync";
+function storage2() {
+  try {
+    return typeof localStorage !== "undefined" ? localStorage : null;
+  } catch {
+    return null;
+  }
+}
+function num(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+function normalizeServerCart(raw) {
+  const items = (Array.isArray(raw?.items) ? raw.items : []).filter((item) => item && typeof item === "object" && item.id !== void 0 && item.id !== null).map((item) => {
+    const images = Array.isArray(item.images) ? item.images.filter((src) => typeof src === "string" && src) : [];
+    return {
+      ...item,
+      id: String(item.id),
+      name: typeof item.name === "string" ? item.name : "",
+      price: num(item.price),
+      unitPrice: num(item.unitPrice ?? item.price),
+      quantity: Math.max(1, Math.floor(num(item.quantity) || 1)),
+      lineTotal: num(item.lineTotal),
+      discountType: typeof item.discountType === "string" && item.discountType ? item.discountType : null,
+      discountValue: item.discountValue != null && item.discountValue !== "" ? num(item.discountValue) : null,
+      images,
+      image: typeof item.image === "string" && item.image ? item.image : images[0] || null
+    };
+  });
+  return {
+    items,
+    itemCount: raw?.itemCount != null ? num(raw.itemCount) : items.reduce((sum, line) => sum + line.quantity, 0),
+    subtotal: raw?.subtotal != null ? num(raw.subtotal) : items.reduce((sum, line) => sum + line.lineTotal, 0),
+    currency: typeof raw?.currency === "string" ? raw.currency : "",
+    coupon: typeof raw?.coupon === "string" && raw.coupon ? raw.coupon : null,
+    removed: Array.isArray(raw?.removed) ? raw.removed : [],
+    adjusted: Array.isArray(raw?.adjusted) ? raw.adjusted : [],
+    ...raw?.mode === "guest" || raw?.mode === "customer" ? { mode: raw.mode } : {}
+  };
+}
+var ServerCartClient = class {
+  constructor(options) {
+    this.options = options;
+    this.base = options.cartApi.replace(/\/+$/, "") || "/cart";
+  }
+  options;
+  migration = null;
+  migrationConsumed = false;
+  base;
+  async get() {
+    const migrated = await this.migrate();
+    if (migrated && !this.migrationConsumed) {
+      this.migrationConsumed = true;
+      return migrated;
+    }
+    return this.request("GET", `${this.base}.js`);
+  }
+  async add(id, quantity, options) {
+    await this.migrate();
+    return this.mutate("add.js", { id, quantity, ...options && Object.keys(options).length ? { options } : {} });
+  }
+  async change(id, quantity) {
+    await this.migrate();
+    return this.mutate("change.js", { id, quantity });
+  }
+  async clear() {
+    await this.migrate();
+    return this.mutate("clear.js", {});
+  }
+  async setCoupon(code2) {
+    await this.migrate();
+    return this.mutate("coupon.js", { code: code2 });
+  }
+  /** Başka sekmede değişince çağrılır; aboneliği kaldıran fonksiyon döner */
+  subscribe(onChange) {
+    if (typeof window === "undefined" || typeof window.addEventListener !== "function") return () => {
+    };
+    const listener = (event) => {
+      if (event.key === CART_SYNC_KEY) onChange();
+    };
+    window.addEventListener("storage", listener);
+    return () => window.removeEventListener("storage", listener);
+  }
+  /**
+   * Eski temaların localStorage sepeti (`cart`, `crafter_cart_coupon`) sayfa başına bir kez taşınır: sunucu sepeti
+   * boşsa satırlar (yalnızca id + adet), kupon yoksa kupon gönderilir; ardından anahtarlar silinir. Sunucu sepeti
+   * doluysa sunucudaki esas alınır ve anahtarlar yine silinir. Ağ / sunucu hatasında localStorage korunur (sonraki
+   * sayfada tekrar denenir); istek reddedilirse (4xx) kayıt bozuk sayılır ve silinir.
+   * Dönüş: taşıma sırasında okunan son sepet (yoksa null).
+   */
+  migrate() {
+    if (!this.migration) this.migration = this.runMigration();
+    return this.migration;
+  }
+  async runMigration() {
+    const store = storage2();
+    if (!store) return null;
+    let lines;
+    let coupon;
+    try {
+      const raw = store.getItem(CART_STORAGE_KEY);
+      coupon = store.getItem(CART_COUPON_KEY) || null;
+      if (raw === null && !coupon) return null;
+      try {
+        lines = normalizeLines(JSON.parse(raw || "[]"));
+      } catch {
+        lines = [];
+      }
+    } catch {
+      return null;
+    }
+    const forget = () => {
+      try {
+        store.removeItem(CART_STORAGE_KEY);
+        store.removeItem(CART_COUPON_KEY);
+      } catch {
+      }
+    };
+    try {
+      let cart = await this.request("GET", `${this.base}.js`);
+      let changed = false;
+      if (lines.length && cart.items.length === 0) {
+        cart = await this.request("POST", `${this.base}/add.js`, {
+          items: lines.map((line) => ({ id: line.id, quantity: line.quantity }))
+        });
+        changed = true;
+      }
+      if (coupon && !cart.coupon) {
+        cart = await this.request("POST", `${this.base}/coupon.js`, { code: coupon });
+        changed = true;
+      }
+      forget();
+      if (changed) this.ping();
+      return cart;
+    } catch (error) {
+      const status = error?.statusCode ?? 0;
+      if (status >= 400 && status < 500) forget();
+      return null;
+    }
+  }
+  async mutate(path, body) {
+    const cart = await this.request("POST", `${this.base}/${path}`, body);
+    this.ping();
+    return cart;
+  }
+  ping() {
+    try {
+      storage2()?.setItem(CART_SYNC_KEY, String(Date.now()));
+    } catch {
+    }
+  }
+  async request(method, url, body) {
+    const doFetch = this.options.fetchImpl ?? (typeof fetch === "function" ? fetch : void 0);
+    if (!doFetch) {
+      throw new CrafterError({ statusCode: 503, type: "cart_unavailable", message: "[Crafter SDK] fetch bulunamad\u0131" });
+    }
+    const headers = { Accept: "application/json" };
+    if (method === "POST") headers["Content-Type"] = "application/json";
+    const locale = this.options.locale?.();
+    if (locale) headers["X-Crafter-Locale"] = locale;
+    let response;
+    try {
+      response = await doFetch(url, {
+        method,
+        headers,
+        credentials: "same-origin",
+        cache: "no-store",
+        ...method === "POST" ? { body: JSON.stringify(body ?? {}) } : {}
+      });
+    } catch (error) {
+      throw new CrafterError({
+        statusCode: 503,
+        type: "cart_unavailable",
+        message: `[Crafter SDK] Sepete ula\u015F\u0131lamad\u0131: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
+    const text = await response.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = text;
+    }
+    if (!response.ok) throw CrafterError.fromResponse(response.status, data ?? `HTTP ${response.status}`);
+    return normalizeServerCart(data);
+  }
+};
+
 // src/core/dom-events.ts
 var DOM_EVENTS = {
   ready: "crafter:ready",
@@ -1267,28 +1456,13 @@ function discountedUnitPrice(line) {
   return line.discountType === "percentage" ? Math.max(0, price - price * discount / 100) : Math.max(0, price - discount);
 }
 var MAX_QUANTITY = 999;
-var CartModule = class {
-  constructor(http, events, options = {}, deps = {}) {
-    this.http = http;
-    this.events = events;
-    this.options = options;
-    this.payments = new PaymentsModule(http, events, options);
-    this.store = deps.store ?? new LocalStorageCartStore();
-    this.dom = deps.dom ?? new DomEvents(events);
-    this.storeCurrency = deps.storeCurrency ?? (() => "");
-    this.store.subscribe(() => {
-      void this.get().then((cart) => this.dom.emit("cart:updated", cart));
-    });
+var LocalCartBackend = class {
+  constructor(store, storeCurrency) {
+    this.store = store;
+    this.storeCurrency = storeCurrency;
   }
-  http;
-  events;
-  options;
-  payments;
   store;
-  dom;
   storeCurrency;
-  // ===================== Sepet içeriği (#447) =====================
-  /** Sepetin güncel hali */
   async get() {
     const [lines, coupon] = await Promise.all([this.store.read(), this.store.readCoupon()]);
     const items = lines.map((line) => {
@@ -1303,17 +1477,12 @@ var CartModule = class {
       coupon
     };
   }
-  /** Ürünü ekler; sepette varsa adedi artar. `crafter:cart:updated` yayar. */
-  async add(product, quantity = 1) {
-    if (product?.id === void 0 || product.id === null || product.id === "") {
-      throw new TypeError("[Crafter SDK] cart.add: \xFCr\xFCn id gerekli");
-    }
+  async add(product, quantity) {
     const id = String(product.id);
-    const amount = Math.max(1, Math.floor(Number(quantity) || 1));
     const lines = await this.store.read();
     const existing = lines.find((line) => line.id === id);
     if (existing) {
-      existing.quantity = Math.min(MAX_QUANTITY, existing.quantity + amount);
+      existing.quantity = Math.min(MAX_QUANTITY, existing.quantity + quantity);
     } else {
       const images = Array.isArray(product.images) ? product.images.filter(Boolean) : product.image ? [product.image] : [];
       lines.push(
@@ -1322,7 +1491,7 @@ var CartModule = class {
             id,
             name: product.name ?? "",
             price: Number(product.price) || 0,
-            quantity: Math.min(MAX_QUANTITY, amount),
+            quantity: Math.min(MAX_QUANTITY, quantity),
             discountType: product.discountType || null,
             discountValue: product.discountValue ?? null,
             images
@@ -1332,30 +1501,133 @@ var CartModule = class {
     }
     return this.commit(lines);
   }
-  /** Satırın adedini ayarlar; 0 ya da altı satırı siler */
   async update(id, quantity) {
-    const key = String(id);
-    const next = Math.floor(Number(quantity) || 0);
-    const lines = (await this.store.read()).map((line) => line.id === key ? { ...line, quantity: Math.min(MAX_QUANTITY, next) } : line).filter((line) => line.quantity > 0);
+    const lines = (await this.store.read()).map((line) => line.id === id ? { ...line, quantity: Math.min(MAX_QUANTITY, quantity) } : line).filter((line) => line.quantity > 0);
     return this.commit(lines);
   }
   async remove(id) {
-    const key = String(id);
-    return this.commit((await this.store.read()).filter((line) => line.id !== key));
+    return this.commit((await this.store.read()).filter((line) => line.id !== id));
   }
-  /** Sepeti ve kuponu boşaltır */
   async clear() {
     await this.store.writeCoupon(null);
     return this.commit([]);
   }
-  /** Checkout'ta uygulanacak kupon kodu; null kaldırır */
   async setCoupon(code2) {
-    await this.store.writeCoupon(code2 ? String(code2).trim() || null : null);
+    await this.store.writeCoupon(code2);
     return this.commit(await this.store.read());
+  }
+  subscribe(onChange) {
+    return this.store.subscribe(onChange);
   }
   async commit(lines) {
     await this.store.write(lines);
-    const cart = await this.get();
+    return this.get();
+  }
+};
+function cartStateFromServer(cart, fallbackCurrency = "") {
+  return {
+    items: cart.items.map((line) => ({
+      ...line,
+      image: line.image ?? line.images?.[0] ?? null,
+      images: line.images ?? []
+    })),
+    itemCount: cart.itemCount,
+    subtotal: cart.subtotal,
+    currency: cart.currency || fallbackCurrency,
+    coupon: cart.coupon,
+    removed: cart.removed ?? [],
+    adjusted: cart.adjusted ?? []
+  };
+}
+var ServerCartBackend = class {
+  constructor(client, storeCurrency) {
+    this.client = client;
+    this.storeCurrency = storeCurrency;
+  }
+  client;
+  storeCurrency;
+  async get() {
+    return this.state(await this.client.get());
+  }
+  async add(product, quantity) {
+    return this.state(await this.client.add(String(product.id), quantity, product.options ?? null));
+  }
+  async update(id, quantity) {
+    return this.state(await this.client.change(id, Math.max(0, quantity)));
+  }
+  async remove(id) {
+    return this.state(await this.client.change(id, 0));
+  }
+  async clear() {
+    return this.state(await this.client.clear());
+  }
+  async setCoupon(code2) {
+    return this.state(await this.client.setCoupon(code2));
+  }
+  subscribe(onChange) {
+    return this.client.subscribe(onChange);
+  }
+  state(cart) {
+    return cartStateFromServer(cart, this.storeCurrency());
+  }
+};
+var CartModule = class {
+  constructor(http, events, options = {}, deps = {}) {
+    this.http = http;
+    this.events = events;
+    this.options = options;
+    this.payments = new PaymentsModule(http, events, options);
+    this.dom = deps.dom ?? new DomEvents(events);
+    const storeCurrency = deps.storeCurrency ?? (() => "");
+    this.backend = !deps.store && typeof deps.cartApi === "string" && deps.cartApi.trim() ? new ServerCartBackend(
+      new ServerCartClient({ cartApi: deps.cartApi.trim(), locale: deps.locale, fetchImpl: deps.fetchImpl }),
+      storeCurrency
+    ) : new LocalCartBackend(deps.store ?? new LocalStorageCartStore(), storeCurrency);
+    this.backend.subscribe(() => {
+      void this.get().then((cart) => this.dom.emit("cart:updated", cart)).catch(() => void 0);
+    });
+  }
+  http;
+  events;
+  options;
+  payments;
+  backend;
+  dom;
+  /** Sepet sunucuda mı (storefront sepet uçları) */
+  get isServerBacked() {
+    return this.backend instanceof ServerCartBackend;
+  }
+  // ===================== Sepet içeriği (#447, #434) =====================
+  /** Sepetin güncel hali */
+  async get() {
+    return this.backend.get();
+  }
+  /** Ürünü ekler; sepette varsa adedi artar. `crafter:cart:updated` yayar. */
+  async add(product, quantity = 1) {
+    if (product?.id === void 0 || product.id === null || product.id === "") {
+      throw new TypeError("[Crafter SDK] cart.add: \xFCr\xFCn id gerekli");
+    }
+    const amount = Math.min(MAX_QUANTITY, Math.max(1, Math.floor(Number(quantity) || 1)));
+    return this.emit(this.backend.add(product, amount));
+  }
+  /** Satırın adedini ayarlar; 0 ya da altı satırı siler */
+  async update(id, quantity) {
+    const next = Math.min(MAX_QUANTITY, Math.floor(Number(quantity) || 0));
+    return this.emit(this.backend.update(String(id), next));
+  }
+  async remove(id) {
+    return this.emit(this.backend.remove(String(id)));
+  }
+  /** Sepeti ve kuponu boşaltır */
+  async clear() {
+    return this.emit(this.backend.clear());
+  }
+  /** Checkout'ta uygulanacak kupon kodu; null kaldırır */
+  async setCoupon(code2) {
+    return this.emit(this.backend.setCoupon(code2 ? String(code2).trim() || null : null));
+  }
+  async emit(pending) {
+    const cart = await pending;
     this.dom.emit("cart:updated", cart);
     return cart;
   }
@@ -2940,7 +3212,7 @@ function swapSection(id, html) {
 }
 
 // src/version.ts
-var SDK_VERSION = "1.4.0";
+var SDK_VERSION = "1.5.0";
 
 // src/index.ts
 var PREVIEW_PARAMS = ["themeId", "preview_theme_id", "preview_ts", "preview_token"];
@@ -3041,7 +3313,9 @@ var Crafter = class _Crafter {
     this.store = new StoreModule(this.http, this.events);
     const cartModule = new CartModule(this.http, this.events, this.config, {
       dom: this.dom,
-      storeCurrency: () => this.money.storeCurrency
+      storeCurrency: () => this.money.storeCurrency,
+      cartApi: this.context?.routes?.cartApi ?? null,
+      locale: () => this.context?.locale
     });
     this.cart = cartModule;
     this.marketplace = cartModule;
@@ -3128,6 +3402,6 @@ var Crafter = class _Crafter {
 };
 var index_default = Crafter;
 
-export { AuthModule, CART_COUPON_KEY, CART_STORAGE_KEY, CONTEXT_GLOBAL, CartModule, ChestModule, CouponsModule, Crafter, CrafterBalanceTopUpError, CrafterError, CrafterOutOfStockError, CrafterPaymentProviderError, CurrenciesModule, DOM_EVENTS, DomEvents, EventEmitter, ForumModule, HelpcenterModule, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, LegalModule, LicensesModule, LocalStorageCartStore, LocalizationModule, LuckPermsModule, MoneyModule, PagesModule, PaymentErrorType, PaymentsModule, PostsModule, PunishmentsModule, RedeemCodeModule, ReportsModule, SDK_VERSION, SearchModule, SectionsModule, SeoModule, ServersModule, StaffFormsModule, StatisticsModule, StoreModule, TicketsModule, UsersModule, VoteModule, WebsiteModule, currencyDigits, index_default as default, discountedUnitPrice, dispatchDomEvent, formatMoney, htmlToLexical, isBalanceTopUpError, isCrafterError, isLexicalFormat, isOutOfStockError, isPaymentProviderError, legalTermsHeaders, lexicalToHtml, lexicalToPlainText, lexicalToText, normalizeLines, normalizePaymentResponse, parsePaymentStatus, parseTaxBreakdown, payWithQuote, readPageContext, stripLocalePrefix, toLexical, topUpMaxAmount };
+export { AuthModule, CART_COUPON_KEY, CART_STORAGE_KEY, CART_SYNC_KEY, CONTEXT_GLOBAL, CartModule, ChestModule, CouponsModule, Crafter, CrafterBalanceTopUpError, CrafterError, CrafterOutOfStockError, CrafterPaymentProviderError, CurrenciesModule, DOM_EVENTS, DomEvents, EventEmitter, ForumModule, HelpcenterModule, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, LegalModule, LicensesModule, LocalCartBackend, LocalStorageCartStore, LocalizationModule, LuckPermsModule, MoneyModule, PagesModule, PaymentErrorType, PaymentsModule, PostsModule, PunishmentsModule, RedeemCodeModule, ReportsModule, SDK_VERSION, SearchModule, SectionsModule, SeoModule, ServerCartBackend, ServerCartClient, ServersModule, StaffFormsModule, StatisticsModule, StoreModule, TicketsModule, UsersModule, VoteModule, WebsiteModule, cartStateFromServer, currencyDigits, index_default as default, discountedUnitPrice, dispatchDomEvent, formatMoney, htmlToLexical, isBalanceTopUpError, isCrafterError, isLexicalFormat, isOutOfStockError, isPaymentProviderError, legalTermsHeaders, lexicalToHtml, lexicalToPlainText, lexicalToText, normalizeLines, normalizePaymentResponse, normalizeServerCart, parsePaymentStatus, parseTaxBreakdown, payWithQuote, readPageContext, stripLocalePrefix, toLexical, topUpMaxAmount };
 //# sourceMappingURL=index.mjs.map
 //# sourceMappingURL=index.mjs.map

@@ -1,7 +1,7 @@
 /**
- * Sepet deposu (#447). Bugün tarayıcıda: localStorage 'cart' ve 'crafter_cart_coupon' anahtarları, storefront
- * checkout'unun (`src/app/checkout/cart.ts`) okuduğu biçimle aynı. Hibrit sepet (#434) gelince sunucu deposu bu
- * arayüzü uygular; `crafter.cart` API'si değişmez (bütün metotlar zaten Promise döner).
+ * localStorage sepet deposu (#447): 'cart' ve 'crafter_cart_coupon' anahtarları. Headless kullanımda ve sepet uçları
+ * olmayan sayfalarda kullanılır. Storefront içinde sepet sunucudadır (#434, `cart-server.ts`); bu anahtarlar oradan
+ * bir kez taşınıp silinir.
  */
 
 /** Depodaki satır: checkout'un okuduğu alanlar */

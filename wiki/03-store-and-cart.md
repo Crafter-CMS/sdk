@@ -90,6 +90,29 @@ Yöneticinin mağaza için belirlediği genel ayarları ve aktif **sepette toplu
 
 ## 🛍️ Sepet & Satın Alma (`crafter.cart` / `crafter.marketplace`)
 
+### Sepet içeriği ve nerede tutulduğu (#447, #434)
+
+`get()`, `add(product, qty?)`, `update(id, qty)`, `remove(id)`, `clear()`, `setCoupon(code)` hepsi `CartState` döner:
+`items`, `itemCount`, `subtotal` (mağaza para biriminde), `currency`, `coupon`; storefront sepetinde ayrıca `removed[]`
+(satıştan kalkan / tükenen ürün) ve `adjusted[]` (stoğa göre düşürülen adet). Her değişiklikte `crafter:cart:updated` yayılır.
+
+- **Storefront içinde** (sayfa bağlamında `routes.cartApi` varsa, SDK 1.5.0+): sepet storefront'un `/cart.js`,
+  `/cart/add.js`, `/cart/change.js`, `/cart/clear.js`, `/cart/coupon.js` uçlarındadır. Ziyaretçide imzalı `httpOnly`
+  çerezde, giriş/kayıtta hesaba katılır ve cihazlar arası aynı kalır. Fiyat gönderilmez; sunucu güncel üründen hesaplar
+  (`add({ id })` yeterli). Eski localStorage sepeti ilk işlemde bir kez sunucuya taşınır. Sekmeler arası
+  `crafter_cart_sync` sinyaliyle güncellenir. Hata: `CrafterError` (`409 cart_product_unavailable`, `422 cart_full`,
+  `503 cart_unavailable`).
+- **Headless** (bağlam yoksa): localStorage `cart` / `crafter_cart_coupon`; fiyat `add()` ile verilen değerdir.
+
+```js
+try {
+  const cart = await crafter.cart.add({ id: 'prod_123' }, 2);
+  if (cart.adjusted?.length) console.log('Stok kadar eklendi');
+} catch (error) {
+  if (error.type === 'cart_product_unavailable') alert('Ürün şu anda satın alınamıyor');
+}
+```
+
 ### 5. `purchase(data)` (Bakiye ile Satın Alma)
 Kullanıcının site bakiyesini kullanarak sepetindeki ürünleri satın almasını sağlar.
 
