@@ -69,8 +69,8 @@ yazmaz; `window.Crafter` hazır örnektir ve `document`'a `crafter:ready` yayıl
 kodunu kendisi yazmaz (`crafter theme check` bunu denetler):
 
 ```js
-// Sepet (bugün localStorage 'cart'; hibrit sepet #434 gelince API aynı kalır)
-await Crafter.cart.add({ id, name, price, image }, 1);   // update(id, qty), remove(id), get(), clear()
+// Sepet (#434): storefront'ta sunucuda (ziyaretçide imzalı çerez, girişte hesaba katılır); fiyatı sunucu hesaplar
+await Crafter.cart.add({ id }, 1);   // update(id, qty), remove(id), get(), clear()
 document.addEventListener('crafter:cart:updated', (e) => (badge.textContent = e.detail.itemCount));
 
 // Para: mağaza tutarı → müşterinin para birimi, sayfanın dilinde (Liquid `money` filtresiyle aynı)
@@ -130,7 +130,7 @@ const crafter = new Crafter({
 | **`crafter.luckperms`** | `/v2/modules/luckperms` *(v2)* | `getPlayer(usernameOrUuid)` *(Oyuncunun oyun içi ana rütbesi, yetkileri ve devralınan grupları)*, `getGroups()` |
 | **`crafter.website`** | `/` *(Kök / Site Bilgisi)* | `getInfo()` *(Sitenin adı, para birimi, logosu, faviconu ve aktif eklenti modülleri: discord_bot, authme vb.)* |
 | **`crafter.store`** | `/categories`, `/products`, `/config/marketplace` | `getCategories()`, `getCategory(id)`, `getProducts()`, `getProduct(id)`, `getProductsByCategory(catId)`, `getConfig()` *(Sepette toplu indirim ayarları)* |
-| **`crafter.cart` / `marketplace`** | `/marketplace` | **Sepet:** `get()`, `add(product, qty?)`, `update(id, qty)`, `remove(id)`, `clear()`, `setCoupon(code)` *(localStorage 'cart'; `crafter:cart:updated`)*<br>`purchase({ productIds, coupon? })` *(Site bakiyesinden anında satın alım)*, `checkout(dto)` *(sağlayıcıda ödeme)* |
+| **`crafter.cart` / `marketplace`** | `/marketplace` | **Sepet:** `get()`, `add(product, qty?)`, `update(id, qty)`, `remove(id)`, `clear()`, `setCoupon(code)` *(storefront'ta `/cart.js` uçları, headless kullanımda localStorage 'cart'; `crafter:cart:updated`)*<br>`purchase({ productIds, coupon? })` *(Site bakiyesinden anında satın alım)*, `checkout(dto)` *(sağlayıcıda ödeme)* |
 | **`crafter.money`** | — | `format(amount, { convert?, currency?, locale? })`, `convert(amount)`, `currency`, `storeCurrency`, `rate` *(sayfa bağlamından)* |
 | **`crafter.localization`** | `POST /localization` | `get()`, `set({ language?, currency? }, { returnTo?, reload? })` |
 | **`crafter.sections`** | `?sections=` | `render(ids, { url?, swap? })` *(bölümleri yeniden çizer)* |

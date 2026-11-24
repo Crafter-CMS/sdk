@@ -1,5 +1,26 @@
 # Değişiklik Günlüğü
 
+## 1.5.0 — 2026-11-24
+
+Hibrit sepet (#434): storefront içinde sepet sunucudadır. Ziyaretçi giriş yapana kadar storefront'un imzalı çerezinde,
+giriş/kayıtta hesaba katılır ve cihazlar arası aynı kalır. `crafter.cart` API'si, `CartState` ve `crafter:cart:updated`
+olayı değişmez. Kıran değişiklik yok.
+
+### Eklenenler
+- Sayfa bağlamında `routes.cartApi` (ör. `'/cart'`) varsa `crafter.cart` storefront uçlarını kullanır: `GET /cart.js`,
+  `POST /cart/add.js`, `/cart/change.js`, `/cart/clear.js`, `/cart/coupon.js` (`credentials: 'same-origin'`,
+  `X-Crafter-Locale`). Fiyat gönderilmez; tutarları sunucu güncel üründen hesaplar. Bağlam yoksa (headless) ya da eski
+  storefront'ta localStorage deposu eskisi gibi çalışır; `CartModuleDeps.store` verilirse her zaman o kullanılır.
+- Eski localStorage sepetinin bir kerelik taşınması: sunucu sepeti boşsa satırlar (id + adet) ve kupon gönderilir,
+  ardından `cart` / `crafter_cart_coupon` anahtarları silinir. Ağ hatasında korunur, sonraki sayfada tekrar denenir.
+- `CartState.removed[]` ve `CartState.adjusted[]`: satıştan kalkan / tükenen ürünler ve stoğa göre düşürülen adetler
+  (sunucu bir kez bildirir).
+- Sekmeler arası eşitleme: değişiklikte `crafter_cart_sync` yazılır, diğer sekmeler sepeti yeniden okuyup olay yayar.
+- `crafter.cart.isServerBacked`, `CartBackend`, `LocalCartBackend`, `ServerCartBackend`, `ServerCartClient`,
+  `CART_SYNC_KEY`, `cartStateFromServer`; `CartAddInput.options` (varyant / seçenek).
+- Sepet uç hataları `CrafterError` olarak döner: `cart_product_unavailable` (409), `cart_full` (422),
+  `cart_unavailable` (503, ağ hatası dahil).
+
 ## 1.4.0 — 2026-11-23
 
 Temalarda SDK zorunlu (#447): storefront her v2 tema sayfasına SDK'nın tarayıcı derlemesini sürümlü adresten ekler ve
