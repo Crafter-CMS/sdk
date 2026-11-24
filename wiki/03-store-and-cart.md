@@ -92,9 +92,11 @@ Yöneticinin mağaza için belirlediği genel ayarları ve aktif **sepette toplu
 
 ### Sepet içeriği ve nerede tutulduğu (#447, #434)
 
-`get()`, `add(product, qty?)`, `update(id, qty)`, `remove(id)`, `clear()`, `setCoupon(code)` hepsi `CartState` döner:
-`items`, `itemCount`, `subtotal` (mağaza para biriminde), `currency`, `coupon`; storefront sepetinde ayrıca `removed[]`
-(satıştan kalkan / tükenen ürün) ve `adjusted[]` (stoğa göre düşürülen adet). Her değişiklikte `crafter:cart:updated` yayılır.
+`get()`, `add(product, qty?)`, `update(id, qty)`, `remove(id)`, `clear()`, `setCoupon(code)`, `removeCoupon()` hepsi
+`CartState` döner: `items`, `itemCount`, `subtotal`, `discount` (kupon indirimi), `total` (`subtotal - discount`; hepsi
+mağaza para biriminde), `currency`, `coupon`, `couponDetails`; storefront sepetinde ayrıca `removed[]` (satıştan kalkan /
+tükenen ürün), `adjusted[]` (stoğa göre düşürülen adet) ve `couponRemoved` (geçersizleşip düşürülen kupon). Her
+değişiklikte `crafter:cart:updated` yayılır.
 
 - **Storefront içinde** (sayfa bağlamında `routes.cartApi` varsa, SDK 1.5.0+): sepet storefront'un `/cart.js`,
   `/cart/add.js`, `/cart/change.js`, `/cart/clear.js`, `/cart/coupon.js` uçlarındadır. Ziyaretçide imzalı `httpOnly`
@@ -112,6 +114,42 @@ try {
   if (error.type === 'cart_product_unavailable') alert('Ürün şu anda satın alınamıyor');
 }
 ```
+
+### Kupon (#476, SDK 1.5.1+)
+
+Storefront sepetinde `setCoupon(code)` kuponu sunucuda hemen doğrular. Geçerliyse dönen sepette `discount`, `total` ve
+`couponDetails` (`code`, `type`: `'percentage' | 'fixed' | 'free_product'`, `value`, `freeProductId`) doludur. Geçersizse
+`CrafterCouponError` fırlatılır (HTTP 422): `type` bir `CouponErrorType` kodudur, `message` sayfanın dilindedir ve doğrudan
+gösterilebilir, `coupon_cart_total_below_minimum` için `minCartValue` (`details.minCartValue`) gelir. Reddedilen kupon
+sepete yazılmaz, sepet değişmez ve olay yayılmaz. `removeCoupon()` (ya da `setCoupon(null)` / boş kod) kuponu kaldırır.
+
+Saklı kupon sonradan geçersizleşirse (ör. ürün silinip tutar alt sınırın altına düştü) sunucu kuponu düşürür ve sepette
+bir kez `couponRemoved: { code, reason }` bildirir; `reason` aynı `CouponErrorType` kodlarıdır. Eski localStorage kuponu
+(`crafter_cart_coupon`) taşınırken de yalnızca sunucu kabul ederse sepete geçer; reddedilirse satırlar korunur, kupon
+düşer ve `couponRemoved` bildirilir.
+
+Kupon hata kodları (`CouponErrorType`): `coupon_not_found`, `coupon_inactive`, `coupon_usage_limit_reached`,
+`coupon_already_used_by_user`, `coupon_not_assigned_to_user`, `coupon_cart_total_below_minimum`,
+`coupon_invalid_for_product`, `coupon_invalid_type`.
+
+```js
+import { isCouponError } from '@crafter-cms/sdk';
+
+try {
+  const cart = await crafter.cart.setCoupon(input.value);
+  showTotals(crafter.money.format(cart.discount), crafter.money.format(cart.total));
+} catch (error) {
+  if (isCouponError(error)) showCouponError(error.message); // sayfanın dilinde
+  else throw error;
+}
+
+crafter.dom.on('cart:updated', (cart) => {
+  if (cart.couponRemoved) notify(`${cart.couponRemoved.code} kuponu artık geçerli değil`);
+});
+```
+
+localStorage sepeti (headless) kuponu doğrulayamaz: kodu saklar; `discount` her zaman 0, `total` = `subtotal`,
+`couponDetails` null. İndirimi checkout hesaplar.
 
 ### 5. `purchase(data)` (Bakiye ile Satın Alma)
 Kullanıcının site bakiyesini kullanarak sepetindeki ürünleri satın almasını sağlar.

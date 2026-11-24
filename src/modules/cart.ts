@@ -10,7 +10,14 @@ import {
   payWithQuote,
 } from './payments';
 import { CartStore, LocalStorageCartStore, normalizeLines, StoredCartLine } from './cart-store';
-import { CartAdjustedNote, CartRemovedNote, ServerCartClient, ServerCartResponse } from './cart-server';
+import {
+  CartAdjustedNote,
+  CartCouponDetails,
+  CartCouponRemovedNote,
+  CartRemovedNote,
+  ServerCartClient,
+  ServerCartResponse,
+} from './cart-server';
 import { DomEvents } from '../core/dom-events';
 
 /** Sepete eklenecek ürün; tema genelde `data-*` özniteliklerinden verir */
@@ -45,6 +52,19 @@ export interface CartState {
   /** Mağaza para birimi (sayfa bağlamından); bilinmiyorsa boş */
   currency: string;
   coupon: string | null;
+  /**
+   * Kupon indirimi, mağaza para biriminde (#476); kupon yoksa 0. localStorage sepeti kuponu doğrulayamaz: her zaman 0.
+   */
+  discount?: number;
+  /** Ödenecek tutar: `subtotal - discount` (en az 0), mağaza para biriminde (#476) */
+  total?: number;
+  /** Geçerli kuponun ayrıntısı (#476): `code`, `type`, `value`, `freeProductId`; kupon yoksa (ya da localStorage) null */
+  couponDetails?: CartCouponDetails | null;
+  /**
+   * Storefront sepeti (#476): saklı kupon geçersizleştiği için düşürüldüyse bir kez bildirilir (`code`, `reason`:
+   * `CouponErrorType` kodu, ör. `coupon_cart_total_below_minimum`); yoksa null
+   */
+  couponRemoved?: CartCouponRemovedNote | null;
   /** Storefront sepeti (#434): satıştan kalkan / tükenen ürün düştüyse bir kez bildirilir */
   removed?: CartRemovedNote[];
   /** Storefront sepeti (#434): adet stoğa göre düşürüldüyse bir kez bildirilir */
@@ -101,12 +121,18 @@ export class LocalCartBackend implements CartBackend {
       const unitPrice = discountedUnitPrice(line);
       return { ...line, image: line.images?.[0] || null, unitPrice, lineTotal: unitPrice * line.quantity };
     });
+    const subtotal = items.reduce((sum, line) => sum + line.lineTotal, 0);
+    // Kupon burada doğrulanamaz: indirimi checkout hesaplar
     return {
       items,
       itemCount: items.reduce((sum, line) => sum + line.quantity, 0),
-      subtotal: items.reduce((sum, line) => sum + line.lineTotal, 0),
+      subtotal,
       currency: this.storeCurrency(),
       coupon,
+      discount: 0,
+      total: subtotal,
+      couponDetails: null,
+      couponRemoved: null,
     };
   }
 
@@ -178,6 +204,10 @@ export function cartStateFromServer(cart: ServerCartResponse, fallbackCurrency =
     subtotal: cart.subtotal,
     currency: cart.currency || fallbackCurrency,
     coupon: cart.coupon,
+    discount: cart.discount ?? 0,
+    total: cart.total ?? Math.max(0, cart.subtotal - (cart.discount ?? 0)),
+    couponDetails: cart.couponDetails ?? null,
+    couponRemoved: cart.couponRemoved ?? null,
     removed: cart.removed ?? [],
     adjusted: cart.adjusted ?? [],
   };
@@ -286,9 +316,19 @@ export class CartModule {
     return this.emit(this.backend.clear());
   }
 
-  /** Checkout'ta uygulanacak kupon kodu; null kaldırır */
+  /**
+   * Kuponu uygular; null / boş kaldırır. Storefront sepetinde sunucu hemen doğrular (#476): geçerliyse `discount`,
+   * `total`, `couponDetails` dolu döner; geçersizse `CrafterCouponError` (HTTP 422; `type`: `CouponErrorType`,
+   * `message` sayfanın dilinde, `details.minCartValue`) fırlatılır, sepet değişmez ve `crafter:cart:updated` yayılmaz.
+   * localStorage sepeti kuponu doğrulayamaz: kodu saklar, indirimi checkout hesaplar.
+   */
   public async setCoupon(code: string | null): Promise<CartState> {
     return this.emit(this.backend.setCoupon(code ? String(code).trim() || null : null));
+  }
+
+  /** Kuponu kaldırır (`setCoupon(null)`) */
+  public async removeCoupon(): Promise<CartState> {
+    return this.setCoupon(null);
   }
 
   private async emit(pending: Promise<CartState>): Promise<CartState> {

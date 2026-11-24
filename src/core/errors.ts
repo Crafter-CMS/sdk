@@ -52,6 +52,9 @@ export class CrafterError extends Error {
       case PaymentErrorType.BALANCE_TOP_UP_TOTAL_LIMIT_EXCEEDED:
         return new CrafterBalanceTopUpError(payload);
       default:
+        if (payload.type && COUPON_ERROR_TYPES.includes(payload.type)) {
+          return new CrafterCouponError(payload);
+        }
         if (payload.type && PAYMENT_PROVIDER_ERROR_TYPES.includes(payload.type)) {
           return new CrafterPaymentProviderError(payload);
         }
@@ -100,7 +103,44 @@ const PAYMENT_PROVIDER_ERROR_TYPES: string[] = [
   PaymentErrorType.PAYMENT_CURRENCY_UNSUPPORTED,
 ];
 
+/**
+ * Kupon reddi (#476): `crafter.cart.setCoupon()` (storefront `POST /cart/coupon.js`, HTTP 422) ve kupon doğrulaması.
+ * Sepet ayrıca `couponRemoved.reason` alanında aynı kodlarla bildirir (saklı kupon geçersizleşip düşürüldüyse).
+ */
+export const CouponErrorType = {
+  NOT_FOUND: 'coupon_not_found',
+  INACTIVE: 'coupon_inactive',
+  USAGE_LIMIT_REACHED: 'coupon_usage_limit_reached',
+  ALREADY_USED_BY_USER: 'coupon_already_used_by_user',
+  NOT_ASSIGNED_TO_USER: 'coupon_not_assigned_to_user',
+  /** Sepet tutarı kuponun alt sınırının altında (`details.minCartValue`, mağaza para biriminde) */
+  CART_TOTAL_BELOW_MINIMUM: 'coupon_cart_total_below_minimum',
+  INVALID_FOR_PRODUCT: 'coupon_invalid_for_product',
+  INVALID_TYPE: 'coupon_invalid_type',
+} as const;
+
+export type CouponErrorTypeValue = (typeof CouponErrorType)[keyof typeof CouponErrorType];
+
+/** Kupon hata kodlarının listesi */
+export const COUPON_ERROR_TYPES: string[] = Object.values(CouponErrorType);
+
 type ErrorPayload = ConstructorParameters<typeof CrafterError>[0];
+
+/**
+ * Kupon reddedildi (#476). `message` sayfanın dilinde, doğrudan gösterilebilir; `type` için `CouponErrorType`.
+ * Reddedilen kupon sepete yazılmaz, sepet değişmez.
+ */
+export class CrafterCouponError extends CrafterError {
+  /** `coupon_cart_total_below_minimum` ise kuponun alt sınırı (`details.minCartValue`); yoksa null */
+  public readonly minCartValue: number | null;
+
+  constructor(payload: ErrorPayload) {
+    super(payload);
+    this.name = 'CrafterCouponError';
+    const min = Number(payload.details?.minCartValue);
+    this.minCartValue = payload.details?.minCartValue != null && Number.isFinite(min) ? min : null;
+  }
+}
 
 /** Stok ödeme başlatılırken yetersiz çıktı (HTTP 409, `out_of_stock`). */
 export class CrafterOutOfStockError extends CrafterError {
@@ -181,6 +221,14 @@ export function isOutOfStockError(err: unknown): err is CrafterOutOfStockError {
 
 export function isBalanceTopUpError(err: unknown): err is CrafterBalanceTopUpError {
   return err instanceof CrafterBalanceTopUpError;
+}
+
+/** Kupon reddi mi (`CrafterCouponError` ya da kupon hata kodlu `CrafterError`) */
+export function isCouponError(err: unknown): err is CrafterCouponError {
+  return (
+    err instanceof CrafterCouponError ||
+    (isCrafterError(err) && typeof err.type === 'string' && COUPON_ERROR_TYPES.includes(err.type))
+  );
 }
 
 export function isPaymentProviderError(err: unknown): err is CrafterPaymentProviderError {

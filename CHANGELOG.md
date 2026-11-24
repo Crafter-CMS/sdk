@@ -1,5 +1,31 @@
 # Değişiklik Günlüğü
 
+## 1.5.1 — 2026-11-24
+
+Kupon düzeltmesi (#476): storefront sepetinde kupon eklenirken hemen doğrulanır, sepet indirim ve toplamı döner, eski
+(geçersiz) kupon sepette takılı kalmaz. Kıran değişiklik yok; yeni alanlar isteğe bağlıdır.
+
+### Eklenenler
+- `CartState.discount` (kupon indirimi), `CartState.total` (`subtotal - discount`, en az 0; ikisi de mağaza para
+  biriminde), `CartState.couponDetails` (`code`, `type`: `'percentage' | 'fixed' | 'free_product'`, `value`,
+  `freeProductId`) ve `CartState.couponRemoved` (`{ code, reason }`: saklı kupon geçersizleşip düşürüldüyse bir kez).
+  Alanlar `ServerCartResponse` / `cartStateFromServer` ile aktarılır; eski storefront göndermezse indirim 0, toplam ara
+  toplam, diğerleri null. localStorage sepeti kuponu doğrulayamaz: indirim 0, toplam ara toplam, `couponDetails` null.
+- `crafter.cart.removeCoupon()` (`setCoupon(null)` ile aynı).
+- `CrafterCouponError` (`minCartValue`), `CouponErrorType`, `COUPON_ERROR_TYPES`, `isCouponError(error)`. Kupon hata
+  kodları: `coupon_not_found`, `coupon_inactive`, `coupon_usage_limit_reached`, `coupon_already_used_by_user`,
+  `coupon_not_assigned_to_user`, `coupon_cart_total_below_minimum` (`details.minCartValue`),
+  `coupon_invalid_for_product`, `coupon_invalid_type`.
+- Tipler: `CartCouponDetails`, `CartCouponRemovedNote`.
+
+### Düzeltilenler
+- `crafter.cart.setCoupon(code)`: storefront `POST /cart/coupon.js` geçersiz kuponu 422 ile reddeder; SDK bunu
+  `CrafterCouponError` (`type`, sayfanın dilinde `message`, `details`) olarak fırlatır, sepet değişmez ve
+  `crafter:cart:updated` yayılmaz.
+- Eski localStorage sepetinin taşınması: kupon yalnızca sunucu kabul ederse taşınır. Kupon adımı 4xx ile reddedilirse
+  taşınan satırlar kaybolmaz, kupon düşer, `cart` ve `crafter_cart_coupon` anahtarları silinir ve dönen sepette
+  `couponRemoved` bildirilir. Ağ / sunucu hatasında anahtarlar eskisi gibi korunur.
+
 ## 1.5.0 — 2026-11-24
 
 Hibrit sepet (#434): storefront içinde sepet sunucudadır. Ziyaretçi giriş yapana kadar storefront'un imzalı çerezinde,

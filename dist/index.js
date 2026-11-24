@@ -40,6 +40,9 @@ var CrafterError = class _CrafterError extends Error {
       case PaymentErrorType.BALANCE_TOP_UP_TOTAL_LIMIT_EXCEEDED:
         return new CrafterBalanceTopUpError(payload);
       default:
+        if (payload.type && COUPON_ERROR_TYPES.includes(payload.type)) {
+          return new CrafterCouponError(payload);
+        }
         if (payload.type && PAYMENT_PROVIDER_ERROR_TYPES.includes(payload.type)) {
           return new CrafterPaymentProviderError(payload);
         }
@@ -82,6 +85,28 @@ var PAYMENT_PROVIDER_ERROR_TYPES = [
   PaymentErrorType.PAYMENT_FAILED,
   PaymentErrorType.PAYMENT_CURRENCY_UNSUPPORTED
 ];
+var CouponErrorType = {
+  NOT_FOUND: "coupon_not_found",
+  INACTIVE: "coupon_inactive",
+  USAGE_LIMIT_REACHED: "coupon_usage_limit_reached",
+  ALREADY_USED_BY_USER: "coupon_already_used_by_user",
+  NOT_ASSIGNED_TO_USER: "coupon_not_assigned_to_user",
+  /** Sepet tutarı kuponun alt sınırının altında (`details.minCartValue`, mağaza para biriminde) */
+  CART_TOTAL_BELOW_MINIMUM: "coupon_cart_total_below_minimum",
+  INVALID_FOR_PRODUCT: "coupon_invalid_for_product",
+  INVALID_TYPE: "coupon_invalid_type"
+};
+var COUPON_ERROR_TYPES = Object.values(CouponErrorType);
+var CrafterCouponError = class extends CrafterError {
+  /** `coupon_cart_total_below_minimum` ise kuponun alt sınırı (`details.minCartValue`); yoksa null */
+  minCartValue;
+  constructor(payload) {
+    super(payload);
+    this.name = "CrafterCouponError";
+    const min = Number(payload.details?.minCartValue);
+    this.minCartValue = payload.details?.minCartValue != null && Number.isFinite(min) ? min : null;
+  }
+};
 var CrafterOutOfStockError = class extends CrafterError {
   /** Tükenen ürünlerin kimlikleri (`details.productIds`); backend göndermediyse boş */
   productIds;
@@ -127,6 +152,9 @@ function isOutOfStockError(err) {
 }
 function isBalanceTopUpError(err) {
   return err instanceof CrafterBalanceTopUpError;
+}
+function isCouponError(err) {
+  return err instanceof CrafterCouponError || isCrafterError(err) && typeof err.type === "string" && COUPON_ERROR_TYPES.includes(err.type);
 }
 function isPaymentProviderError(err) {
   return err instanceof CrafterPaymentProviderError;
@@ -1232,6 +1260,21 @@ function num(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
+var COUPON_KINDS = ["percentage", "fixed", "free_product"];
+function couponDetailsOf(raw) {
+  if (!raw || typeof raw !== "object" || typeof raw.code !== "string" || !raw.code) return null;
+  if (!COUPON_KINDS.includes(raw.type)) return null;
+  return {
+    code: raw.code,
+    type: raw.type,
+    value: raw.value != null && raw.value !== "" && Number.isFinite(Number(raw.value)) ? Number(raw.value) : null,
+    freeProductId: raw.freeProductId != null && raw.freeProductId !== "" ? String(raw.freeProductId) : null
+  };
+}
+function couponRemovedOf(raw) {
+  if (!raw || typeof raw !== "object" || typeof raw.code !== "string" || !raw.code) return null;
+  return { code: raw.code, reason: typeof raw.reason === "string" && raw.reason ? raw.reason : "coupon_invalid" };
+}
 function normalizeServerCart(raw) {
   const items = (Array.isArray(raw?.items) ? raw.items : []).filter((item) => item && typeof item === "object" && item.id !== void 0 && item.id !== null).map((item) => {
     const images = Array.isArray(item.images) ? item.images.filter((src) => typeof src === "string" && src) : [];
@@ -1249,12 +1292,18 @@ function normalizeServerCart(raw) {
       image: typeof item.image === "string" && item.image ? item.image : images[0] || null
     };
   });
+  const subtotal = raw?.subtotal != null ? num(raw.subtotal) : items.reduce((sum, line) => sum + line.lineTotal, 0);
+  const discount = Math.max(0, num(raw?.discount));
   return {
     items,
     itemCount: raw?.itemCount != null ? num(raw.itemCount) : items.reduce((sum, line) => sum + line.quantity, 0),
-    subtotal: raw?.subtotal != null ? num(raw.subtotal) : items.reduce((sum, line) => sum + line.lineTotal, 0),
+    subtotal,
     currency: typeof raw?.currency === "string" ? raw.currency : "",
     coupon: typeof raw?.coupon === "string" && raw.coupon ? raw.coupon : null,
+    discount,
+    total: raw?.total != null && raw.total !== "" ? Math.max(0, num(raw.total)) : Math.max(0, subtotal - discount),
+    couponDetails: couponDetailsOf(raw?.couponDetails),
+    couponRemoved: couponRemovedOf(raw?.couponRemoved),
     removed: Array.isArray(raw?.removed) ? raw.removed : [],
     adjusted: Array.isArray(raw?.adjusted) ? raw.adjusted : [],
     ...raw?.mode === "guest" || raw?.mode === "customer" ? { mode: raw.mode } : {}
@@ -1308,6 +1357,8 @@ var ServerCartClient = class {
    * boşsa satırlar (yalnızca id + adet), kupon yoksa kupon gönderilir; ardından anahtarlar silinir. Sunucu sepeti
    * doluysa sunucudaki esas alınır ve anahtarlar yine silinir. Ağ / sunucu hatasında localStorage korunur (sonraki
    * sayfada tekrar denenir); istek reddedilirse (4xx) kayıt bozuk sayılır ve silinir.
+   * Kupon yalnızca sunucu kabul ederse taşınır (#476): kupon adımı 4xx ile reddedilirse taşınan satırlar korunur,
+   * kupon düşer, iki anahtar da silinir ve dönen sepette `couponRemoved: { code, reason }` bir kez bildirilir.
    * Dönüş: taşıma sırasında okunan son sepet (yoksa null).
    */
   migrate() {
@@ -1338,9 +1389,13 @@ var ServerCartClient = class {
       } catch {
       }
     };
+    const rejected = (error) => {
+      const status = error?.statusCode ?? 0;
+      return status >= 400 && status < 500;
+    };
+    let changed = false;
     try {
       let cart = await this.request("GET", `${this.base}.js`);
-      let changed = false;
       if (lines.length && cart.items.length === 0) {
         cart = await this.request("POST", `${this.base}/add.js`, {
           items: lines.map((line) => ({ id: line.id, quantity: line.quantity }))
@@ -1348,15 +1403,20 @@ var ServerCartClient = class {
         changed = true;
       }
       if (coupon && !cart.coupon) {
-        cart = await this.request("POST", `${this.base}/coupon.js`, { code: coupon });
-        changed = true;
+        try {
+          cart = await this.request("POST", `${this.base}/coupon.js`, { code: coupon });
+          changed = true;
+        } catch (error) {
+          if (!rejected(error)) throw error;
+          cart = { ...cart, couponRemoved: { code: coupon, reason: error.type || "coupon_invalid" } };
+        }
       }
       forget();
       if (changed) this.ping();
       return cart;
     } catch (error) {
-      const status = error?.statusCode ?? 0;
-      if (status >= 400 && status < 500) forget();
+      if (rejected(error)) forget();
+      if (changed) this.ping();
       return null;
     }
   }
@@ -1473,12 +1533,17 @@ var LocalCartBackend = class {
       const unitPrice = discountedUnitPrice(line);
       return { ...line, image: line.images?.[0] || null, unitPrice, lineTotal: unitPrice * line.quantity };
     });
+    const subtotal = items.reduce((sum, line) => sum + line.lineTotal, 0);
     return {
       items,
       itemCount: items.reduce((sum, line) => sum + line.quantity, 0),
-      subtotal: items.reduce((sum, line) => sum + line.lineTotal, 0),
+      subtotal,
       currency: this.storeCurrency(),
-      coupon
+      coupon,
+      discount: 0,
+      total: subtotal,
+      couponDetails: null,
+      couponRemoved: null
     };
   }
   async add(product, quantity) {
@@ -1539,6 +1604,10 @@ function cartStateFromServer(cart, fallbackCurrency = "") {
     subtotal: cart.subtotal,
     currency: cart.currency || fallbackCurrency,
     coupon: cart.coupon,
+    discount: cart.discount ?? 0,
+    total: cart.total ?? Math.max(0, cart.subtotal - (cart.discount ?? 0)),
+    couponDetails: cart.couponDetails ?? null,
+    couponRemoved: cart.couponRemoved ?? null,
     removed: cart.removed ?? [],
     adjusted: cart.adjusted ?? []
   };
@@ -1626,9 +1695,18 @@ var CartModule = class {
   async clear() {
     return this.emit(this.backend.clear());
   }
-  /** Checkout'ta uygulanacak kupon kodu; null kaldırır */
+  /**
+   * Kuponu uygular; null / boş kaldırır. Storefront sepetinde sunucu hemen doğrular (#476): geçerliyse `discount`,
+   * `total`, `couponDetails` dolu döner; geçersizse `CrafterCouponError` (HTTP 422; `type`: `CouponErrorType`,
+   * `message` sayfanın dilinde, `details.minCartValue`) fırlatılır, sepet değişmez ve `crafter:cart:updated` yayılmaz.
+   * localStorage sepeti kuponu doğrulayamaz: kodu saklar, indirimi checkout hesaplar.
+   */
   async setCoupon(code2) {
     return this.emit(this.backend.setCoupon(code2 ? String(code2).trim() || null : null));
+  }
+  /** Kuponu kaldırır (`setCoupon(null)`) */
+  async removeCoupon() {
+    return this.setCoupon(null);
   }
   async emit(pending) {
     const cart = await pending;
@@ -3216,7 +3294,7 @@ function swapSection(id, html) {
 }
 
 // src/version.ts
-var SDK_VERSION = "1.5.0";
+var SDK_VERSION = "1.5.1";
 
 // src/index.ts
 var PREVIEW_PARAMS = ["themeId", "preview_theme_id", "preview_ts", "preview_token"];
@@ -3411,11 +3489,14 @@ exports.CART_COUPON_KEY = CART_COUPON_KEY;
 exports.CART_STORAGE_KEY = CART_STORAGE_KEY;
 exports.CART_SYNC_KEY = CART_SYNC_KEY;
 exports.CONTEXT_GLOBAL = CONTEXT_GLOBAL;
+exports.COUPON_ERROR_TYPES = COUPON_ERROR_TYPES;
 exports.CartModule = CartModule;
 exports.ChestModule = ChestModule;
+exports.CouponErrorType = CouponErrorType;
 exports.CouponsModule = CouponsModule;
 exports.Crafter = Crafter;
 exports.CrafterBalanceTopUpError = CrafterBalanceTopUpError;
+exports.CrafterCouponError = CrafterCouponError;
 exports.CrafterError = CrafterError;
 exports.CrafterOutOfStockError = CrafterOutOfStockError;
 exports.CrafterPaymentProviderError = CrafterPaymentProviderError;
@@ -3470,6 +3551,7 @@ exports.dispatchDomEvent = dispatchDomEvent;
 exports.formatMoney = formatMoney;
 exports.htmlToLexical = htmlToLexical;
 exports.isBalanceTopUpError = isBalanceTopUpError;
+exports.isCouponError = isCouponError;
 exports.isCrafterError = isCrafterError;
 exports.isLexicalFormat = isLexicalFormat;
 exports.isOutOfStockError = isOutOfStockError;

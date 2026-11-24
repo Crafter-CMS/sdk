@@ -9,7 +9,7 @@ import { CART_COUPON_KEY, CART_STORAGE_KEY, normalizeLines } from './cart-store'
  *   POST /cart/add.js     { id, quantity, options? } | { items: [{ id, quantity }] }
  *   POST /cart/change.js  { id, quantity }   (0 siler; id ürün id'si ya da satır anahtarı)
  *   POST /cart/clear.js
- *   POST /cart/coupon.js  { code | null }
+ *   POST /cart/coupon.js  { code | null }  (geçersiz kupon 422 + `type`, sepet değişmez; null / '' kaldırır)
  */
 
 /** Sunucunun döndürdüğü satır */
@@ -52,12 +52,36 @@ export interface CartAdjustedNote {
   reason: string;
 }
 
+/** Sepetteki geçerli kuponun ayrıntısı (#476) */
+export interface CartCouponDetails {
+  code: string;
+  type: 'percentage' | 'fixed' | 'free_product';
+  /** Yüzde ya da mağaza para biriminde tutar; `free_product` için null olabilir */
+  value: number | null;
+  /** `free_product` kuponunda hediye ürün; diğerlerinde null */
+  freeProductId: string | null;
+}
+
+/** Saklı kupon geçersizleşip sepetten düşürüldü (#476); `reason` kupon hata kodu (bkz. `CouponErrorType`) */
+export interface CartCouponRemovedNote {
+  code: string;
+  reason: string;
+}
+
 export interface ServerCartResponse {
   items: ServerCartLine[];
   itemCount: number;
   subtotal: number;
   currency: string;
   coupon: string | null;
+  /** Kupon indirimi, mağaza para biriminde (#476); kupon yoksa 0 */
+  discount?: number;
+  /** Ödenecek tutar: `subtotal - discount` (en az 0), mağaza para biriminde (#476) */
+  total?: number;
+  /** Geçerli kuponun ayrıntısı (#476); kupon yoksa null */
+  couponDetails?: CartCouponDetails | null;
+  /** Saklı kupon düşürüldüyse bir kez bildirilir (#476); yoksa null */
+  couponRemoved?: CartCouponRemovedNote | null;
   removed?: CartRemovedNote[];
   adjusted?: CartAdjustedNote[];
   mode?: 'guest' | 'customer';
@@ -87,6 +111,24 @@ function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+const COUPON_KINDS = ['percentage', 'fixed', 'free_product'];
+
+function couponDetailsOf(raw: any): CartCouponDetails | null {
+  if (!raw || typeof raw !== 'object' || typeof raw.code !== 'string' || !raw.code) return null;
+  if (!COUPON_KINDS.includes(raw.type)) return null;
+  return {
+    code: raw.code,
+    type: raw.type,
+    value: raw.value != null && raw.value !== '' && Number.isFinite(Number(raw.value)) ? Number(raw.value) : null,
+    freeProductId: raw.freeProductId != null && raw.freeProductId !== '' ? String(raw.freeProductId) : null,
+  };
+}
+
+function couponRemovedOf(raw: any): CartCouponRemovedNote | null {
+  if (!raw || typeof raw !== 'object' || typeof raw.code !== 'string' || !raw.code) return null;
+  return { code: raw.code, reason: typeof raw.reason === 'string' && raw.reason ? raw.reason : 'coupon_invalid' };
+}
+
 /** Yanıtı tip güvenli biçime getirir; bozuk satırlar atılır */
 export function normalizeServerCart(raw: any): ServerCartResponse {
   const items: ServerCartLine[] = (Array.isArray(raw?.items) ? raw.items : [])
@@ -107,12 +149,19 @@ export function normalizeServerCart(raw: any): ServerCartResponse {
         image: typeof item.image === 'string' && item.image ? item.image : images[0] || null,
       };
     });
+  const subtotal = raw?.subtotal != null ? num(raw.subtotal) : items.reduce((sum, line) => sum + line.lineTotal, 0);
+  // Eski storefront indirim göndermez: indirim 0, toplam ara toplam
+  const discount = Math.max(0, num(raw?.discount));
   return {
     items,
     itemCount: raw?.itemCount != null ? num(raw.itemCount) : items.reduce((sum, line) => sum + line.quantity, 0),
-    subtotal: raw?.subtotal != null ? num(raw.subtotal) : items.reduce((sum, line) => sum + line.lineTotal, 0),
+    subtotal,
     currency: typeof raw?.currency === 'string' ? raw.currency : '',
     coupon: typeof raw?.coupon === 'string' && raw.coupon ? raw.coupon : null,
+    discount,
+    total: raw?.total != null && raw.total !== '' ? Math.max(0, num(raw.total)) : Math.max(0, subtotal - discount),
+    couponDetails: couponDetailsOf(raw?.couponDetails),
+    couponRemoved: couponRemovedOf(raw?.couponRemoved),
     removed: Array.isArray(raw?.removed) ? raw.removed : [],
     adjusted: Array.isArray(raw?.adjusted) ? raw.adjusted : [],
     ...(raw?.mode === 'guest' || raw?.mode === 'customer' ? { mode: raw.mode } : {}),
@@ -177,6 +226,8 @@ export class ServerCartClient {
    * boşsa satırlar (yalnızca id + adet), kupon yoksa kupon gönderilir; ardından anahtarlar silinir. Sunucu sepeti
    * doluysa sunucudaki esas alınır ve anahtarlar yine silinir. Ağ / sunucu hatasında localStorage korunur (sonraki
    * sayfada tekrar denenir); istek reddedilirse (4xx) kayıt bozuk sayılır ve silinir.
+   * Kupon yalnızca sunucu kabul ederse taşınır (#476): kupon adımı 4xx ile reddedilirse taşınan satırlar korunur,
+   * kupon düşer, iki anahtar da silinir ve dönen sepette `couponRemoved: { code, reason }` bir kez bildirilir.
    * Dönüş: taşıma sırasında okunan son sepet (yoksa null).
    */
   public migrate(): Promise<ServerCartResponse | null> {
@@ -209,9 +260,13 @@ export class ServerCartClient {
         // yok sayılır
       }
     };
+    const rejected = (error: unknown) => {
+      const status = (error as CrafterError)?.statusCode ?? 0;
+      return status >= 400 && status < 500;
+    };
+    let changed = false;
     try {
       let cart = await this.request('GET', `${this.base}.js`);
-      let changed = false;
       if (lines.length && cart.items.length === 0) {
         cart = await this.request('POST', `${this.base}/add.js`, {
           items: lines.map((line) => ({ id: line.id, quantity: line.quantity })),
@@ -219,15 +274,21 @@ export class ServerCartClient {
         changed = true;
       }
       if (coupon && !cart.coupon) {
-        cart = await this.request('POST', `${this.base}/coupon.js`, { code: coupon });
-        changed = true;
+        try {
+          cart = await this.request('POST', `${this.base}/coupon.js`, { code: coupon });
+          changed = true;
+        } catch (error) {
+          // Geçersiz eski kupon taşınmaz; satırlar sunucuda kalır. Ağ / sunucu hatası dış catch'e gider (anahtarlar korunur).
+          if (!rejected(error)) throw error;
+          cart = { ...cart, couponRemoved: { code: coupon, reason: (error as CrafterError).type || 'coupon_invalid' } };
+        }
       }
       forget();
       if (changed) this.ping();
       return cart;
     } catch (error) {
-      const status = (error as CrafterError)?.statusCode ?? 0;
-      if (status >= 400 && status < 500) forget();
+      if (rejected(error)) forget();
+      if (changed) this.ping();
       return null;
     }
   }
