@@ -1,24 +1,24 @@
-# 📜 Hukuki Belgeler & Şikayetler (`crafter.legal` & `crafter.reports`)
+# 📜 Legal Documents & Reports (`crafter.legal` & `crafter.reports`)
 
-Kullanım koşulları, kurallar, gizlilik politikası ve oyuncuların kural ihlallerini yetkililere bildirmesini yönetir.
+Handles the terms of use, rules, privacy policy and players reporting rule violations to the staff.
 
 ---
 
 ## 📌 Hukuki Belgeler (`crafter.legal`)
 
 ### 1. `getDocuments()`
-Yöneticinin panelden girdiği sunucu kuralları, gizlilik politikası ve kullanıcı sözleşmesini tek nesnede getirir.
+Fetches the server rules, privacy policy and user agreement the admin entered in the panel, in a single object.
 
-* **HTTP Rota:** `GET /config/legal`
-* **Dönüş:**
+* **HTTP Route:** `GET /config/legal`
+* **Returns:**
   ```typescript
   interface LegalDocuments {
-    rules?: string;             // Sunucu & Site Kuralları HTML/Markdown
-    privacy_policy?: string;    // Gizlilik Politikası
-    terms_of_service?: string;  // Kullanım Şartları
+    rules?: string;             // Server & site rules, HTML/Markdown
+    privacy_policy?: string;    // Privacy policy
+    terms_of_service?: string;  // Terms of service
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   const docs = await crafter.legal.getDocuments();
 
@@ -29,20 +29,20 @@ Yöneticinin panelden girdiği sunucu kuralları, gizlilik politikası ve kullan
 
 ---
 
-## 🚨 Şikayet & Rapor Modülü (`crafter.reports`)
+## 🚨 Reports Module (`crafter.reports`)
 
-Kullanıcıların hile yapan, küfür eden veya kural ihlalinde bulunan oyuncuları yetkililere rapor etmesini sağlar.
+Lets users report players who cheat, swear or break the rules to the staff.
 
 ### 2. `create(reportedUserId, data)`
-* **HTTP Rota:** `POST /reports/:reportedUserId`
-* **Girdi:**
+* **HTTP Route:** `POST /reports/:reportedUserId`
+* **Input:**
   ```typescript
   interface CreateReportDto {
     reportType: 'spam' | 'harassment' | 'inappropriate_content' | 'fraud' | 'other';
-    reason: string; // Şikayet açıklaması
+    reason: string; // Report description
   }
   ```
-* **Dönüş:**
+* **Returns:**
   ```typescript
   interface ReportResponse {
     id: string;
@@ -54,16 +54,16 @@ Kullanıcıların hile yapan, küfür eden veya kural ihlalinde bulunan oyuncula
     createdAt: string;
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   try {
-    const report = await crafter.reports.create('oyuncu-uuid', {
+    const report = await crafter.reports.create('player-uuid', {
       reportType: 'harassment',
-      reason: 'Oyun içi sohbette ailevi değerlere hakaret etti.'
+      reason: 'Insulted other players in the in-game chat.'
     });
 
-    alert('Şikayetiniz yetkili ekibine iletildi. Bilet No: #' + report.id.slice(0, 6));
+    alert('Your report was sent to the staff team. Ticket no: #' + report.id.slice(0, 6));
   } catch (err) {
-    alert('Şikayet gönderilemedi: ' + err.message);
+    alert('Could not send the report: ' + err.message);
   }
   ```

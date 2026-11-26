@@ -1,19 +1,19 @@
-# 📊 İstatistikler & Cezalar (`crafter.statistics` & `crafter.punishments`)
+# 📊 Statistics & Punishments (`crafter.statistics` & `crafter.punishments`)
 
-Sunucunun canlı akış verilerini (son satın alımlar, son ödemeler, en çok kredi yükleyenler) ve oyuncu ceza geçmişini (Ban, Mute, Warn) yönetir.
+Handles the server's live feed data (latest purchases, latest payments, top spenders) and player punishment history (ban, mute, warn).
 
 ---
 
-## 📌 İstatistikler Modülü (`crafter.statistics`)
+## 📌 Statistics Module (`crafter.statistics`)
 
-Ana sayfadaki canlı vitrinleri ve lider tablolarını beslemek için kullanılır.
+Used to feed the live showcases and leaderboards on the home page.
 
 ### 1. `get(limit?)`
-Son ödemeleri, son mağaza satın alımlarını, son kayıt olan oyuncuları ve en çok kredi yükleyenleri (Leaderboard) tek bir istekte toplar.
+Gathers the latest payments, latest store purchases, newest registered players and top spenders (leaderboard) in a single request.
 
-* **HTTP Rota:** `GET /v2/statistics?limit=:limit`
-* **Varsayılan Limit:** `5`
-* **Dönüş:**
+* **HTTP Route:** `GET /v2/statistics?limit=:limit`
+* **Default limit:** `5`
+* **Returns:**
   ```typescript
   interface SiteStatistics {
     latest: {
@@ -25,47 +25,47 @@ Son ödemeleri, son mağaza satın alımlarını, son kayıt olan oyuncuları ve
     totalUsers: number;
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   const stats = await crafter.statistics.get(5);
-  const { currency } = await crafter.website.getInfo(); // tutarlar mağaza para biriminde
+  const { currency } = await crafter.website.getInfo(); // amounts are in the store currency
 
-  // 1. Son Satın Alımlar Akışı
+  // 1. Latest purchases feed
   stats.latest.purchases.forEach(p => {
-    console.log(`${p.username}, ${p.serverName} sunucusunda ${p.productName} satın aldı.`);
+    console.log(`${p.username} bought ${p.productName} on ${p.serverName}.`);
   });
 
-  // 2. Lider Tablosu (En Çok Kredi Yükleyenler)
+  // 2. Leaderboard (top spenders)
   stats.topCreditLoaders.forEach((loader, index) => {
     console.log(`#${index + 1} - ${loader.username}: ${Crafter.utils.formatMoney(loader.totalAmount, currency)}`);
   });
 
-  // 3. Toplam Oyuncu Sayısı
+  // 3. Total player count
   document.querySelector('#total-users').innerText = stats.totalUsers;
   ```
 
 ---
 
-## ⚖️ Ceza & Yasaklama Modülü (`crafter.punishments`)
+## ⚖️ Punishments & Bans Module (`crafter.punishments`)
 
-Oyun sunucularındaki yasaklama (Ban), susturma (Mute), uyarı (Warn) veya atılma (Kick) kayıtlarını listeler ve arar.
+Lists and searches ban, mute, warn or kick records on the game servers.
 
 ### 2. `list(page?, limit?)`
-Aktif ve geçmiş tüm cezaları sayfalanmış olarak listeler.
+Lists all active and past punishments, paginated.
 
-* **HTTP Rota:** `GET /v2/punishments`
-* **Dönüş:**
+* **HTTP Route:** `GET /v2/punishments`
+* **Returns:**
   ```typescript
   interface PaginatedPunishmentsResponse {
     punishments: Array<{
       id: string | number;
-      name: string;             // Cezalandırılan oyuncu
-      reason: string;           // Ceza sebebi
-      operator: string;         // Cezayı uygulayan yetkili
+      name: string;             // Punished player
+      reason: string;           // Punishment reason
+      operator: string;         // Staff member who applied the punishment
       punishmentType: 'ban' | 'mute' | 'kick' | 'warn';
-      start: number;            // Başlangıç timestamp (ms)
-      end: number;              // Bitiş timestamp (ms) (-1 sınırsız)
-      active: boolean;          // Ceza halen devam ediyor mu?
+      start: number;            // Start timestamp (ms)
+      end: number;              // End timestamp (ms) (-1 permanent)
+      active: boolean;          // Is the punishment still in effect?
     }>;
     pagination: {
       page: number;
@@ -77,7 +77,7 @@ Aktif ve geçmiş tüm cezaları sayfalanmış olarak listeler.
     };
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   const res = await crafter.punishments.list(1, 20);
   res.punishments.forEach(p => {
@@ -88,11 +88,11 @@ Aktif ve geçmiş tüm cezaları sayfalanmış olarak listeler.
 ---
 
 ### 3. `search(query, type?)`
-Oyuncu adına ve opsiyonel ceza türüne göre anlık arama yapar.
+Searches instantly by player name and an optional punishment type.
 
-* **HTTP Rota:** `GET /v2/punishments/search?query=:query&type=:type`
-* **Örnek:**
+* **HTTP Route:** `GET /v2/punishments/search?query=:query&type=:type`
+* **Example:**
   ```javascript
-  // 'oyuncu_adi' isimli oyuncunun ban kayıtlarını ara:
-  const bans = await crafter.punishments.search('oyuncu_adi', 'ban');
+  // Search the ban records of the player named 'player_name':
+  const bans = await crafter.punishments.search('player_name', 'ban');
   ```

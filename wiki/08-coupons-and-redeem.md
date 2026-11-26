@@ -1,58 +1,58 @@
-# 🎟️ Kuponlar & Hediye Kodları (`crafter.coupons` & `crafter.redeemCode`)
+# 🎟️ Coupons & Gift Codes (`crafter.coupons` & `crafter.redeemCode`)
 
-İndirim kuponu sorgulama, sepet indirimi kontrolü ve promosyon / hediye kartı bozdurma işlemlerini yönetir.
+Handles discount coupon lookups, cart discount checks and redeeming promotion / gift cards.
 
 ---
 
-## 📌 Kupon Modülü (`crafter.coupons`)
+## 📌 Coupon Module (`crafter.coupons`)
 
 ### 1. `get(couponCode)`
-Kullanıcının sepet sayfasında girdiği indirim kuponunun geçerli olup olmadığını, indirim miktarını ve sepet kısıtlamalarını kontrol eder.
+Checks whether the discount coupon the user entered on the cart page is valid, the discount amount and the cart restrictions.
 
-* **HTTP Rota:** `GET /coupons/:couponCode`
-* **Dönüş:** `CouponResponse`
+* **HTTP Route:** `GET /coupons/:couponCode`
+* **Returns:** `CouponResponse`
   ```typescript
   interface CouponResponse {
     id?: string;
     code: string;
-    minCartValue?: number;              // Minimum sepet tutarı şartı
-    productId?: string | null;          // Sadece belirli bir ürüne mi özel?
-    discountValue: number;              // İndirim miktarı (Örn: 20)
-    discountType: 'percentage' | 'fixed'; // % mi yoksa sabit tutar mı?
+    minCartValue?: number;              // Minimum cart total requirement
+    productId?: string | null;          // Only valid for a specific product?
+    discountValue: number;              // Discount amount (e.g. 20)
+    discountType: 'percentage' | 'fixed'; // Percentage or fixed amount?
     isActive: boolean;
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   try {
-    const { currency } = await crafter.website.getInfo(); // mağaza para birimi
+    const { currency } = await crafter.website.getInfo(); // store currency
     const coupon = await crafter.coupons.get('BAHAR2026');
     if (coupon.isActive) {
       if (coupon.discountType === 'percentage') {
-        console.log(`%${coupon.discountValue} İndirim Uygulandı!`);
+        console.log(`${coupon.discountValue}% discount applied!`);
       } else {
-        console.log(`${Crafter.utils.formatMoney(coupon.discountValue, currency)} İndirim Uygulandı!`);
+        console.log(`${Crafter.utils.formatMoney(coupon.discountValue, currency)} discount applied!`);
       }
     }
   } catch (err) {
-    alert('Geçersiz veya süresi dolmuş kupon kodu!');
+    alert('Invalid or expired coupon code!');
   }
   ```
 
 ---
 
-## 🎁 Hediye / Promosyon Kodları (`crafter.redeemCode`)
+## 🎁 Gift / Promotion Codes (`crafter.redeemCode`)
 
-Yöneticilerin çekilişlerde veya YouTube sponsorluklarında dağıttığı tek kullanımlık bonus veya ürün veren kodları bozdurur.
+Redeems single-use codes that grant a bonus or products, which admins hand out in giveaways or YouTube sponsorships.
 
 ### 2. `use(code)`
-* **HTTP Rota:** `POST /redeem-codes/use`
-* **Girdi:** `{ code: string }`
-* **Dönüş:**
+* **HTTP Route:** `POST /redeem-codes/use`
+* **Input:** `{ code: string }`
+* **Returns:**
   ```typescript
   interface UseRedeemCodeResponse {
-    bonus?: number;       // Yüklenen bakiye/kredi miktarı
-    products?: Array<{    // Sandığa eklenen hediye ürünler
+    bonus?: number;       // Balance/credit amount added
+    products?: Array<{    // Gift products added to the chest
       id: string;
       name: string;
     }>;
@@ -60,18 +60,18 @@ Yöneticilerin çekilişlerde veya YouTube sponsorluklarında dağıttığı tek
     message?: string;
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   try {
     const res = await crafter.redeemCode.use('YOUTUBE-BONUS-100');
     if (res.bonus) {
-      const { currency } = await crafter.website.getInfo(); // bakiye mağaza para biriminde
-      alert(`Tebrikler! Hesabınıza ${Crafter.utils.formatMoney(res.bonus, currency)} bakiye yüklendi.`);
+      const { currency } = await crafter.website.getInfo(); // balance is in the store currency
+      alert(`Congratulations! ${Crafter.utils.formatMoney(res.bonus, currency)} was added to your balance.`);
     }
     if (res.products?.length) {
-      alert(`Tebrikler! ${res.products.map(p => p.name).join(', ')} sandığınıza eklendi.`);
+      alert(`Congratulations! ${res.products.map(p => p.name).join(', ')} added to your chest.`);
     }
   } catch (err) {
-    alert('Kod kullanılamadı: ' + err.message);
+    alert('Could not use the code: ' + err.message);
   }
   ```

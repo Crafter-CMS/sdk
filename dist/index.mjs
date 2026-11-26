@@ -2,7 +2,7 @@
 var CrafterError = class _CrafterError extends Error {
   statusCode;
   error;
-  /** Backend hata kodu (ErrorType), ör. 'out_of_stock', 'balance_top_up_limit_exceeded' */
+  /** Backend error code (ErrorType), e.g. 'out_of_stock', 'balance_top_up_limit_exceeded' */
   type;
   details;
   isCrafterError = true;
@@ -59,13 +59,13 @@ var PaymentErrorType = {
   PAYMENT_CONFIG_ERROR: "payment_config_error",
   PAYMENT_INITIALIZATION_FAILED: "payment_initialization_failed",
   PAYMENT_FAILED: "payment_failed",
-  /** İstemcinin gönderdiği para birimi mağazanınkinden (ya da teklifinkinden) farklı */
+  /** The currency sent by the client differs from the store's (or the quote's) */
   PAYMENT_CURRENCY_MISMATCH: "payment_currency_mismatch",
-  /** Sağlayıcı / satıcı bu para birimini desteklemiyor */
+  /** The provider / seller does not support this currency */
   PAYMENT_CURRENCY_UNSUPPORTED: "payment_currency_unsupported",
-  /** Mağaza müşteri para birimini kapattı: ödeme mağaza para biriminde */
+  /** The store disabled the customer currency: payment is in the store currency */
   CUSTOMER_CURRENCY_NOT_ALLOWED: "customer_currency_not_allowed",
-  /** Teklif bulunamadı / süresi doldu / sepet değişti: yeni teklif alınır */
+  /** Quote not found / expired / cart changed: get a new quote */
   PRESENTMENT_QUOTE_NOT_FOUND: "presentment_quote_not_found",
   PRESENTMENT_QUOTE_EXPIRED: "presentment_quote_expired",
   PRESENTMENT_QUOTE_MISMATCH: "presentment_quote_mismatch"
@@ -87,14 +87,14 @@ var CouponErrorType = {
   USAGE_LIMIT_REACHED: "coupon_usage_limit_reached",
   ALREADY_USED_BY_USER: "coupon_already_used_by_user",
   NOT_ASSIGNED_TO_USER: "coupon_not_assigned_to_user",
-  /** Sepet tutarı kuponun alt sınırının altında (`details.minCartValue`, mağaza para biriminde) */
+  /** Cart total is below the coupon's minimum (`details.minCartValue`, in the store currency) */
   CART_TOTAL_BELOW_MINIMUM: "coupon_cart_total_below_minimum",
   INVALID_FOR_PRODUCT: "coupon_invalid_for_product",
   INVALID_TYPE: "coupon_invalid_type"
 };
 var COUPON_ERROR_TYPES = Object.values(CouponErrorType);
 var CrafterCouponError = class extends CrafterError {
-  /** `coupon_cart_total_below_minimum` ise kuponun alt sınırı (`details.minCartValue`); yoksa null */
+  /** The coupon's minimum (`details.minCartValue`) for `coupon_cart_total_below_minimum`; null otherwise */
   minCartValue;
   constructor(payload) {
     super(payload);
@@ -104,7 +104,7 @@ var CrafterCouponError = class extends CrafterError {
   }
 };
 var CrafterOutOfStockError = class extends CrafterError {
-  /** Tükenen ürünlerin kimlikleri (`details.productIds`); backend göndermediyse boş */
+  /** IDs of the sold-out products (`details.productIds`); empty if the backend did not send them */
   productIds;
   constructor(payload) {
     super({ ...payload, type: payload.type ?? PaymentErrorType.OUT_OF_STOCK });
@@ -115,7 +115,7 @@ var CrafterOutOfStockError = class extends CrafterError {
 };
 var CrafterBalanceTopUpError = class extends CrafterError {
   reason;
-  /** Limit hatalarında backend'in döndürdüğü limitler; `unavailable` için null */
+  /** Limits returned by the backend for limit errors; null for `unavailable` */
   limits;
   constructor(payload) {
     super(payload);
@@ -132,7 +132,7 @@ var CrafterBalanceTopUpError = class extends CrafterError {
   }
 };
 var CrafterPaymentProviderError = class extends CrafterError {
-  /** Kullanıcı aynı bilgilerle biraz sonra tekrar deneyebilir mi */
+  /** Whether the user can retry with the same details a little later */
   retryable;
   constructor(payload) {
     super(payload);
@@ -1048,7 +1048,7 @@ var PaymentsModule = class {
   }
   /**
    * Initiate a payment session (PayTR, Shopier, KuveytTürk, CrafterPayments etc.).
-   * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi) bulunur.
+   * When the seller is an LLC with CrafterPayments, the response includes `stripe` (clientSecret, publishableKey, tax).
    * POST /payment/initiate
    */
   async initiate(data, options = {}) {
@@ -1082,9 +1082,9 @@ var PaymentsModule = class {
     return response;
   }
   /**
-   * Kilitli kur teklifi (~30 dk): tutar mağaza para biriminde hesaplanır, müşterinin para birimini sunucu belirler
-   * (`currency` yalnızca öneridir). Ödeme `quoteId` ile başlatılır. Oturum gerektirir.
-   * Mağaza müşteri para birimini kapattıysa 400 `customer_currency_not_allowed`.
+   * Locked rate quote (~30 min): the amount is calculated in the store currency, the server decides the customer's currency
+   * (`currency` is only a suggestion). Payment starts with `quoteId`. Requires a session.
+   * 400 `customer_currency_not_allowed` if the store disabled the customer currency.
    * POST /payment/quote
    */
   async quote(data) {
@@ -1106,7 +1106,7 @@ var PaymentsModule = class {
     return response;
   }
   /**
-   * Ödeme ve teslimat durumu (oturum gerektirmez). Stripe ödemesinde webhook gecikirse backend ödemeyi Stripe'tan okur.
+   * Payment and delivery status (no session required). For a Stripe payment, if the webhook is late the backend reads the payment from Stripe.
    * GET /payment/status/:paymentId
    */
   async getStatus(paymentId) {
@@ -1118,9 +1118,9 @@ var PaymentsModule = class {
     return result;
   }
   /**
-   * Ödeme sonucu kesinleşene kadar `getStatus` ile yoklar (Stripe `confirmPayment` sonrası).
-   * Ödeme alındı ama teslimat sürüyorsa yoklama devam eder. Süre dolarsa son görülen durum döner.
-   * Ağ hataları yutulur, yoklama sürer.
+   * Polls with `getStatus` until the payment result is final (after Stripe `confirmPayment`).
+   * If the payment was received but delivery is still running, polling continues. On timeout the last seen status is returned.
+   * Network errors are swallowed and polling continues.
    */
   async waitForResult(paymentId, options = {}) {
     const { attempts = 20, intervalMs = 1500, signal } = options;
@@ -1143,8 +1143,8 @@ var PaymentsModule = class {
     return last;
   }
   /**
-   * Bakiye yükleme koşulları: açık mı, limitler (USD ve mağaza para birimi), ödenmiş / bonus bakiye
-   * ve koşul metninin gösterilip gösterilmeyeceği (`showTerms`). Oturum gerektirir.
+   * Balance top-up conditions: whether enabled, limits (USD and the store currency), paid / bonus balance
+   * and whether to show the terms text (`showTerms`). Requires a session.
    * GET /payment/balance-top-up/policy?websiteId=
    */
   async getTopUpPolicy(websiteId) {
@@ -1385,7 +1385,7 @@ var ServerCartClient = class {
     await this.migrate();
     return this.mutate("coupon.js", { code: code2 });
   }
-  /** Başka sekmede değişince çağrılır; aboneliği kaldıran fonksiyon döner */
+  /** Called when it changes in another tab; returns a function that unsubscribes */
   subscribe(onChange) {
     if (typeof window === "undefined" || typeof window.addEventListener !== "function") return () => {
     };
@@ -1396,20 +1396,20 @@ var ServerCartClient = class {
     return () => window.removeEventListener("storage", listener);
   }
   /**
-   * localStorage sepetini (`cart`: v1 temalar, SDK 1.4.0 ve öncesi, headless depo) sunucu sepetiyle eşitler; sayfa
-   * başına bir kez, ilk işlemden önce çalışır. Kural storefront checkout'uyla aynıdır (#434 düzeltme):
-   * - Son eşitlenen hal `crafter_cart_synced` kaydındadır. Ondan sonra eklenen ya da adedi değişen satır sunucuda bu
-   *   adede ayarlanır (`/cart/add.js { items, replace: true }`, toplanmaz); `cart`'tan çıkarılan satır sunucudan da
-   *   düşer (`/cart/change.js { quantity: 0 }`). Değişmeyen satır gönderilmez: sunucuda / başka cihazda yapılan
-   *   değişiklik korunur, sunucuda olup `cart`'ta hiç olmayan satırlar kalır. İlk eşitlemede bütün satırlar yenidir.
-   * - Sunucu sepeti dolu diye `cart` atılmaz (eski kural, eski ödenmemiş sunucu sepetinin yeni seçimin yerine geçmesine
-   *   yol açıyordu). Tekrar çalışması (iki sekme, ağ hatası sonrası) sonucu değiştirmez; adetler katlanmaz.
-   * - `cart` anahtarı kalır (tema sepeti); `cart` hiç yoksa sunucudan satır silinmez ve kayıt temizlenir.
-   * - Ağ / sunucu hatasında kayıt güncellenmez, sonraki sayfada yeniden denenir; 4xx ret (ör. ürün satıştan kalktı)
-   *   bu hali eşitlenmiş sayar.
-   * - Kupon (`crafter_cart_coupon`) sunucu sepetinde kupon yoksa ve sunucu kabul ederse taşınır (#476); 4xx ret
-   *   dönen sepette `couponRemoved: { code, reason }` olarak bir kez bildirilir. Denemeden sonra anahtar silinir.
-   * Dönüş: eşitleme sırasında okunan son sepet (yoksa null).
+   * Syncs the localStorage cart (`cart`: v1 themes, SDK 1.4.0 and earlier, headless store) with the server cart; runs once
+   * per page, before the first operation. The rule matches the storefront checkout (#434 fix):
+   * - The last synced state is in the `crafter_cart_synced` record. A line added or whose quantity changed after that is set to
+   *   this quantity on the server (`/cart/add.js { items, replace: true }`, not added); a line removed from `cart` is dropped
+   *   on the server too (`/cart/change.js { quantity: 0 }`). Unchanged lines are not sent: changes made on the server / another
+   *   device are kept, and lines that are on the server but never in `cart` stay. On the first sync all lines are new.
+   * - `cart` is not discarded just because the server cart is not empty (the old rule let an old unpaid server cart replace
+   *   the new selection). Running again (two tabs, after a network error) does not change the result; quantities do not double.
+   * - The `cart` key stays (the theme cart); if `cart` does not exist at all, no line is removed on the server and the record is cleared.
+   * - On a network / server error the record is not updated and it is retried on the next page; a 4xx rejection (e.g. the product
+   *   was taken off sale) counts this state as synced.
+   * - The coupon (`crafter_cart_coupon`) is moved if the server cart has no coupon and the server accepts it (#476); a 4xx rejection
+   *   is reported once in the returned cart as `couponRemoved: { code, reason }`. The key is removed after the attempt.
+   * Returns: the last cart read during the sync (null if none).
    */
   migrate() {
     if (!this.migration) this.migration = this.runMigration();
@@ -1491,7 +1491,7 @@ var ServerCartClient = class {
   async request(method, url, body) {
     const doFetch = this.options.fetchImpl ?? (typeof fetch === "function" ? fetch : void 0);
     if (!doFetch) {
-      throw new CrafterError({ statusCode: 503, type: "cart_unavailable", message: "[Crafter SDK] fetch bulunamad\u0131" });
+      throw new CrafterError({ statusCode: 503, type: "cart_unavailable", message: "[Crafter SDK] fetch is not available" });
     }
     const headers = { Accept: "application/json" };
     if (method === "POST") headers["Content-Type"] = "application/json";
@@ -1510,7 +1510,7 @@ var ServerCartClient = class {
       throw new CrafterError({
         statusCode: 503,
         type: "cart_unavailable",
-        message: `[Crafter SDK] Sepete ula\u015F\u0131lamad\u0131: ${error instanceof Error ? error.message : String(error)}`
+        message: `[Crafter SDK] Could not reach the cart: ${error instanceof Error ? error.message : String(error)}`
       });
     }
     const text = await response.text();
@@ -1541,7 +1541,7 @@ function dispatchDomEvent(name, detail) {
   try {
     doc.dispatchEvent(new CustomEvent(type, { detail }));
   } catch (error) {
-    console.error(`[Crafter SDK] "${type}" olay\u0131 yay\u0131lamad\u0131:`, error);
+    console.error(`[Crafter SDK] Could not dispatch the "${type}" event:`, error);
   }
 }
 var DomEvents = class {
@@ -1549,13 +1549,13 @@ var DomEvents = class {
     this.events = events;
   }
   events;
-  /** SDK olay yoluna ve `document`'a birlikte yayar */
+  /** Emits on the SDK event bus and on `document` together */
   emit(name, detail) {
     this.events.emit(name, detail);
     dispatchDomEvent(name, detail);
   }
   /**
-   * `document` üzerindeki `crafter:<name>` olayını dinler; işleyici `event.detail` alır. Aboneliği kaldıran fonksiyon döner.
+   * Listens for the `crafter:<name>` event on `document`; the handler receives `event.detail`. Returns a function that unsubscribes.
    * @example crafter.dom.on('cart:updated', (cart) => badge.textContent = cart.itemCount)
    */
   on(name, handler) {
@@ -1723,24 +1723,24 @@ var CartModule = class {
   payments;
   backend;
   dom;
-  /** Sepet sunucuda mı (storefront sepet uçları) */
+  /** Whether the cart lives on the server (storefront cart endpoints) */
   get isServerBacked() {
     return this.backend instanceof ServerCartBackend;
   }
-  // ===================== Sepet içeriği (#447, #434) =====================
-  /** Sepetin güncel hali */
+  // ===================== Cart contents (#447, #434) =====================
+  /** Current state of the cart */
   async get() {
     return this.backend.get();
   }
-  /** Ürünü ekler; sepette varsa adedi artar. `crafter:cart:updated` yayar. */
+  /** Adds the product; if it is already in the cart the quantity increases. Emits `crafter:cart:updated`. */
   async add(product, quantity = 1) {
     if (product?.id === void 0 || product.id === null || product.id === "") {
-      throw new TypeError("[Crafter SDK] cart.add: \xFCr\xFCn id gerekli");
+      throw new TypeError("[Crafter SDK] cart.add: product id is required");
     }
     const amount = Math.min(MAX_QUANTITY, Math.max(1, Math.floor(Number(quantity) || 1)));
     return this.emit(this.backend.add(product, amount));
   }
-  /** Satırın adedini ayarlar; 0 ya da altı satırı siler */
+  /** Sets the line's quantity; 0 or less removes the line */
   async update(id, quantity) {
     const next = Math.min(MAX_QUANTITY, Math.floor(Number(quantity) || 0));
     return this.emit(this.backend.update(String(id), next));
@@ -1748,20 +1748,20 @@ var CartModule = class {
   async remove(id) {
     return this.emit(this.backend.remove(String(id)));
   }
-  /** Sepeti ve kuponu boşaltır */
+  /** Empties the cart and the coupon */
   async clear() {
     return this.emit(this.backend.clear());
   }
   /**
-   * Kuponu uygular; null / boş kaldırır. Storefront sepetinde sunucu hemen doğrular (#476): geçerliyse `discount`,
-   * `total`, `couponDetails` dolu döner; geçersizse `CrafterCouponError` (HTTP 422; `type`: `CouponErrorType`,
-   * `message` sayfanın dilinde, `details.minCartValue`) fırlatılır, sepet değişmez ve `crafter:cart:updated` yayılmaz.
-   * localStorage sepeti kuponu doğrulayamaz: kodu saklar, indirimi checkout hesaplar.
+   * Applies the coupon; null / empty removes it. In the storefront cart the server validates it right away (#476): if valid,
+   * `discount`, `total` and `couponDetails` are returned filled; if invalid a `CrafterCouponError` (HTTP 422; `type`: `CouponErrorType`,
+   * `message` in the page language, `details.minCartValue`) is thrown, the cart does not change and `crafter:cart:updated` is not emitted.
+   * The localStorage cart cannot validate coupons: it stores the code and checkout calculates the discount.
    */
   async setCoupon(code2) {
     return this.emit(this.backend.setCoupon(code2 ? String(code2).trim() || null : null));
   }
-  /** Kuponu kaldırır (`setCoupon(null)`) */
+  /** Removes the coupon (`setCoupon(null)`) */
   async removeCoupon() {
     return this.setCoupon(null);
   }
@@ -1770,7 +1770,7 @@ var CartModule = class {
     this.dom.emit("cart:updated", cart);
     return cart;
   }
-  // ===================== Ödeme =====================
+  // ===================== Payment =====================
   /**
    * Complete purchase using user balance.
    * POST /marketplace/purchase
@@ -1789,10 +1789,10 @@ var CartModule = class {
   /**
    * Pay the cart at a provider. The charged amount is the storefront total.
    * Balance is not credited and the top-up multiplier is not applied.
-   * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi kırılımı) bulunur.
-   * Stok yetersizse `CrafterOutOfStockError` (HTTP 409, `productIds`) fırlatılır.
-   * Para birimini sunucu belirler; `currency` verilmezse gönderilmez. `{ useCustomerCurrency: true }` ile önce kilitli
-   * kur teklifi alınır ve ödeme müşteri para biriminde başlatılır (bkz. `payWithQuote`).
+   * When the seller is an LLC with CrafterPayments, the response includes `stripe` (clientSecret, publishableKey, tax breakdown).
+   * If stock is insufficient a `CrafterOutOfStockError` (HTTP 409, `productIds`) is thrown.
+   * The server decides the currency; if `currency` is not given it is not sent. With `{ useCustomerCurrency: true }` a locked
+   * rate quote is fetched first and payment starts in the customer currency (see `payWithQuote`).
    * POST /payment/checkout
    */
   async checkout(data, options = {}) {
@@ -3114,8 +3114,8 @@ var CurrenciesModule = class {
   events;
   options;
   /**
-   * Mağaza para birimi, izinli para birimleri, müşterinin para birimi ve kurlar.
-   * `currency`: müşterinin seçimi (öneri); izinli değilse ülke / mağaza para birimi döner.
+   * Store currency, allowed currencies, the customer's currency and rates.
+   * `currency`: the customer's choice (a suggestion); if not allowed, the country / store currency is returned.
    * GET /payment/currencies?websiteId=&currency=
    */
   async context(params = {}) {
@@ -3124,7 +3124,7 @@ var CurrenciesModule = class {
     });
   }
   /**
-   * Mağaza para birimindeki tutarları (en fazla 500) müşteri para birimine çevirir; sıra korunur.
+   * Converts store-currency amounts (at most 500) to the customer currency; order is preserved.
    * POST /payment/currencies/convert
    */
   async convert(amounts, params = {}) {
@@ -3169,21 +3169,21 @@ var MoneyModule = class {
     this.getContext = getContext;
   }
   getContext;
-  /** Mağaza para birimi; bağlam yoksa boş */
+  /** Store currency; empty without a context */
   get storeCurrency() {
     return code(this.getContext()?.storeCurrency);
   }
-  /** Müşterinin para birimi; kur geçersizse mağaza para birimi */
+  /** The customer's currency; the store currency if the rate is invalid */
   get currency() {
     const ctx = this.getContext();
     const customer = code(ctx?.customerCurrency);
     return customer && this.rateOf(ctx) ? customer : this.storeCurrency;
   }
-  /** 1 mağaza birimi = rate müşteri birimi; müşteri para birimi mağazanınkiyse 1 */
+  /** 1 store unit = rate customer units; 1 if the customer currency is the store's */
   get rate() {
     return this.currency === this.storeCurrency ? 1 : this.rateOf(this.getContext()) || 1;
   }
-  /** Mağaza tutarını müşteri para birimine çevirir ve o birimin hanesine yuvarlar */
+  /** Converts a store amount to the customer currency and rounds to that unit's decimals */
   convert(storeAmount) {
     const value = Number(storeAmount);
     const n = Number.isFinite(value) ? value : 0;
@@ -3191,8 +3191,8 @@ var MoneyModule = class {
     return target ? round(n * this.rate, target) : n;
   }
   /**
-   * @example Crafter.money.format(19.99)                    // '€18,40' (EUR müşteri, de)
-   * @example Crafter.money.format(250, { convert: false })  // mağaza para biriminde
+   * @example Crafter.money.format(19.99)                    // '€18,40' (EUR customer, de)
+   * @example Crafter.money.format(250, { convert: false })  // in the store currency
    */
   format(amount, options = {}) {
     const ctx = this.getContext();
@@ -3253,8 +3253,8 @@ var LocalizationModule = class {
     };
   }
   /**
-   * Dili ve/veya para birimini değiştirir. Varsayılan olarak sayfa seçilen dildeki adrese gider.
-   * `crafter:localization:changed` olayı (`{ language, currency, url }`) gezinmeden önce yayılır.
+   * Changes the language and/or currency. By default the page navigates to the URL in the chosen language.
+   * The `crafter:localization:changed` event (`{ language, currency, url }`) is emitted before navigating.
    */
   async set(change, options = {}) {
     const ctx = this.getContext();
@@ -3318,7 +3318,7 @@ var SectionsModule = class {
   async render(ids, options = {}) {
     const list = Array.from(new Set((ids || []).map((id) => String(id).trim()).filter(Boolean)));
     if (list.length === 0 || list.length > MAX_SECTIONS) {
-      throw new CrafterError({ statusCode: 400, message: `sections.render: 1-${MAX_SECTIONS} b\xF6l\xFCm` });
+      throw new CrafterError({ statusCode: 400, message: `sections.render: 1-${MAX_SECTIONS} sections` });
     }
     const base = options.url ?? (typeof window !== "undefined" && window.location ? window.location.pathname + window.location.search : "/");
     const url = new URL(base, typeof window !== "undefined" && window.location ? window.location.href : "http://localhost");
@@ -3362,9 +3362,9 @@ var Crafter = class _Crafter {
   config;
   http;
   events;
-  /** `document` olayları: `crafter.dom.on('cart:updated', fn)` */
+  /** `document` events: `crafter.dom.on('cart:updated', fn)` */
   dom;
-  /** Sayfa bağlamı (storefront'un yazdığı `window.__CRAFTER_CONTEXT__`); yoksa null */
+  /** Page context (`window.__CRAFTER_CONTEXT__` written by the storefront); null if absent */
   context;
   money;
   localization;
@@ -3487,8 +3487,8 @@ var Crafter = class _Crafter {
     this.currencies = new CurrenciesModule(this.http, this.events, this.config);
   }
   /**
-   * Checkout sayfasına gider (#447). Sepet için `/checkout?purpose=cart`; checkout dil önekiyle açılmaz,
-   * dili gelinen sayfadan okur. Adres sayfa bağlamından (`routes.checkout`) gelir.
+   * Goes to the checkout page (#447). `/checkout?purpose=cart` for the cart; checkout does not open with the language prefix,
+   * it reads the language from the referring page. The URL comes from the page context (`routes.checkout`).
    */
   checkout(options = {}) {
     const params = new URLSearchParams();
@@ -3508,9 +3508,9 @@ var Crafter = class _Crafter {
     return url;
   }
   /**
-   * Tarayıcı derlemesinin (IIFE) otomatik başlatması (#447). Sayfada `window.__CRAFTER_CONTEXT__` varsa
-   * `window.Crafter` bu bağlamla kurulmuş örnek olur ve `document`'a `crafter:ready` yayılır; yoksa null döner
-   * (`window.Crafter` sınıf olarak kalır, `new Crafter({...})` eskisi gibi çalışır). İkinci çağrı aynı örneği döner.
+   * Auto-start of the browser build (IIFE) (#447). If the page has `window.__CRAFTER_CONTEXT__`,
+   * `window.Crafter` becomes an instance set up with that context and `crafter:ready` is dispatched on `document`; otherwise returns null
+   * (`window.Crafter` stays the class and `new Crafter({...})` works as before). A second call returns the same instance.
    */
   static autoInit(win = typeof window !== "undefined" ? window : void 0) {
     const context = readPageContext(win);

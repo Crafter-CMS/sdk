@@ -1,5 +1,5 @@
-// Ödeme modülü birim testleri (TASK-256). Derlenmiş paketi (dist) test eder: `npm test` önce build alır.
-// Sıfır bağımlılık: node:test + sahte fetch. Kart / kişi verisi yoktur; tüm değerler sentetiktir.
+// Payment module unit tests (TASK-256). Tests the built package (dist): `npm test` builds first.
+// Zero dependencies: node:test + fake fetch. No card / personal data; all values are synthetic.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -40,7 +40,7 @@ function direct(extra = {}) {
   return new Crafter({ mode: 'direct', websiteId: 'site-1', apiBase: 'https://api.test', token: 't', ...extra });
 }
 
-test('LLC: cart.checkout döndürür stripe oturumu, publishable key ve vergi kırılımı', async () => {
+test('LLC: cart.checkout returns the stripe session, publishable key and tax breakdown', async () => {
   reply(200, {
     success: true,
     type: 'stripe',
@@ -91,14 +91,14 @@ test('LLC: cart.checkout döndürür stripe oturumu, publishable key ve vergi k�
   });
 });
 
-test('LLC: backend publishable key döndürürse config değerinden önceliklidir', async () => {
+test('LLC: a publishable key returned by the backend takes precedence over the config value', async () => {
   reply(200, { success: true, type: 'stripe', payment_id: 'p', clientSecret: 's', amount: 5, currency: 'USD', publishableKey: 'pk_test_backend' });
   const res = await direct({ stripePublishableKey: 'pk_test_fallback' }).payments.initiate({ amount: 5, providerId: 'x', user: buyer });
   assert.equal(res.stripe.publishableKey, 'pk_test_backend');
-  assert.equal(res.tax, null, 'vergi bilgisi yoksa null');
+  assert.equal(res.tax, null, 'null without tax info');
 });
 
-test('TR: PayTR iframe yanıtı aynen döner, stripe alanı eklenmez', async () => {
+test('TR: the PayTR iframe response is returned as is, no stripe field is added', async () => {
   reply(200, { success: true, type: 'iframe', payment_id: 'p2', iframeHtml: '<iframe></iframe>', token: 'tok' });
   const crafter = direct();
   const res = await crafter.payments.initiate({ amount: 100, provider: 'paytr', user: buyer });
@@ -111,7 +111,7 @@ test('TR: PayTR iframe yanıtı aynen döner, stripe alanı eklenmez', async () 
   assert.equal(res.paymentId, 'p2');
 });
 
-test('TR: KuveytTürk ve Shopier yanıtları değişmez; para birimi gönderilmez (sunucu belirler)', async () => {
+test('TR: KuveytTürk and Shopier responses are unchanged; no currency is sent (the server decides)', async () => {
   reply(200, { success: true, type: 'kuveytturk_init', payment_id: 'p3', html: '<form></form>' });
   reply(200, { success: true, type: 'redirect', payment_id: 'p4', payment_url: 'https://pay.example.test/x' });
   const crafter = direct();
@@ -123,14 +123,14 @@ test('TR: KuveytTürk ve Shopier yanıtları değişmez; para birimi gönderilme
   assert.equal(sh.payment_url, 'https://pay.example.test/x');
 });
 
-test('OUT_OF_STOCK: tipli hata ve tükenen ürün kimlikleri', async () => {
-  reply(409, { success: false, message: 'Ürün veya ürünler stokta kalmamıştır.', type: 'out_of_stock', details: { productIds: ['p1', 7] } });
+test('OUT_OF_STOCK: typed error and sold-out product IDs', async () => {
+  reply(409, { success: false, message: 'The product(s) are out of stock.', type: 'out_of_stock', details: { productIds: ['p1', 7] } });
   const crafter = direct();
   await assert.rejects(
     crafter.cart.checkout({ providerId: 'x', websiteId: 'site-1', productIds: ['p1'], user: buyer }),
     (err) => {
       assert.ok(err instanceof CrafterOutOfStockError);
-      assert.ok(err instanceof CrafterError, 'CrafterError yapısı korunur');
+      assert.ok(err instanceof CrafterError, 'the CrafterError shape is kept');
       assert.ok(isCrafterError(err) && isOutOfStockError(err));
       assert.equal(err.statusCode, 409);
       assert.equal(err.type, 'out_of_stock');
@@ -141,14 +141,14 @@ test('OUT_OF_STOCK: tipli hata ve tükenen ürün kimlikleri', async () => {
   );
 });
 
-test('Bakiye limiti: tipli hata, neden ve limitler', async () => {
+test('Balance limit: typed error, reason and limits', async () => {
   reply(400, {
     success: false,
     message: 'limit',
     type: 'balance_top_up_limit_exceeded',
     details: { currency: 'EUR', maxSingleUsd: 250, maxPaidUsd: 1000, maxSingleAmount: 230, remainingAmount: 900 },
   });
-  reply(403, { success: false, message: 'kapalı', type: 'balance_top_up_unavailable' });
+  reply(403, { success: false, message: 'disabled', type: 'balance_top_up_unavailable' });
   const crafter = direct();
   await assert.rejects(crafter.payments.initiate({ amount: 999, providerId: 'x', user: buyer }), (err) => {
     assert.ok(err instanceof CrafterBalanceTopUpError);
@@ -164,9 +164,9 @@ test('Bakiye limiti: tipli hata, neden ve limitler', async () => {
   });
 });
 
-test('Ödeme sağlayıcısı hataları tiplidir; bilinmeyen tipler düz CrafterError kalır', async () => {
+test('Payment provider errors are typed; unknown types stay a plain CrafterError', async () => {
   reply(503, { success: false, message: 'vergi', type: 'tax_calculation_failed' });
-  reply(400, { success: false, message: 'başka', type: 'invalid_coupon' });
+  reply(400, { success: false, message: 'other', type: 'invalid_coupon' });
   const crafter = direct();
   await assert.rejects(crafter.payments.initiate({ amount: 1, providerId: 'x', user: buyer }), (err) => {
     assert.ok(err instanceof CrafterPaymentProviderError);
@@ -180,7 +180,7 @@ test('Ödeme sağlayıcısı hataları tiplidir; bilinmeyen tipler düz CrafterE
   });
 });
 
-test('getTopUpPolicy: limitler, ödenmiş/bonus bakiye ve koşul bayrağı', async () => {
+test('getTopUpPolicy: limits, paid/bonus balance and the terms flag', async () => {
   reply(200, {
     data: {
       enabled: true, closedLoop: true, currency: 'EUR', maxSingleUsd: 250, maxPaidUsd: 1000,
@@ -195,7 +195,7 @@ test('getTopUpPolicy: limitler, ödenmiş/bonus bakiye ve koşul bayrağı', asy
   assert.equal(topUpMaxAmount(policy, 500), 120);
 });
 
-test('getTopUpPolicy: TR modunda koşul metni gösterilmez, limit uygulanmaz', async () => {
+test('getTopUpPolicy: in TR mode the terms text is not shown and no limit applies', async () => {
   reply(200, { enabled: true, closedLoop: false, currency: 'TRY', maxSingleUsd: 250, maxPaidUsd: 1000, maxSingleAmount: null, remainingAmount: null, balance: 10, paidBalance: 10, bonusBalance: 0 });
   const policy = await new Crafter({ apiBase: '/api/storefront' }).payments.getTopUpPolicy();
   assert.equal(calls[0].url, '/api/storefront/payment/balance-top-up/policy');
@@ -203,7 +203,7 @@ test('getTopUpPolicy: TR modunda koşul metni gösterilmez, limit uygulanmaz', a
   assert.equal(topUpMaxAmount(policy, 5000), 5000);
 });
 
-test('Sipariş durumu: teslimat özeti, NEEDS_REVIEW ve REFUNDED', () => {
+test('Order status: delivery summary, NEEDS_REVIEW and REFUNDED', () => {
   assert.deepEqual(parsePaymentStatus('p', { status: 'COMPLETED', delivery: 'delivered' }), {
     paymentId: 'p', status: 'COMPLETED', delivery: 'delivered', deliveryStatus: 'DELIVERED', outcome: 'success', final: true,
   });
@@ -216,18 +216,18 @@ test('Sipariş durumu: teslimat özeti, NEEDS_REVIEW ve REFUNDED', () => {
   const delivering = parsePaymentStatus('p', { status: 'COMPLETED', delivery: 'pending' });
   assert.equal(delivering.outcome, 'processing');
   assert.equal(delivering.final, false);
-  // Teslimat bilgisi olmayan (TR / eski backend) yanıt
+  // Response without delivery info (TR / old backend)
   const plain = parsePaymentStatus('p', { status: 'COMPLETED' });
   assert.equal(plain.deliveryStatus, null);
   assert.equal(plain.outcome, 'success');
-  // Backend ileride deliveryStatus döndürürse doğrudan kullanılır
+  // If the backend returns deliveryStatus in the future it is used directly
   assert.equal(parsePaymentStatus('p', { status: 'COMPLETED', deliveryStatus: 'NEEDS_REVIEW' }).deliveryStatus, 'NEEDS_REVIEW');
   assert.equal(parsePaymentStatus('p', { status: 'FAILED' }).outcome, 'failed');
 });
 
-test('waitForResult: teslimat bitene kadar yoklar, ağ hatasında devam eder', async () => {
+test('waitForResult: polls until delivery finishes, continues on a network error', async () => {
   reply(200, { status: 'PENDING' });
-  reply(500, { message: 'geçici' });
+  reply(500, { message: 'transient' });
   reply(200, { status: 'COMPLETED', delivery: 'pending' });
   reply(200, { status: 'REFUNDED', delivery: 'refunded' });
   const crafter = direct();
@@ -237,6 +237,6 @@ test('waitForResult: teslimat bitene kadar yoklar, ağ hatasında devam eder', a
   assert.equal(result.outcome, 'refunded');
   assert.equal(calls.length, 4);
   assert.equal(calls[0].url, 'https://api.test/website/payment/status/pay%201');
-  assert.equal(calls[0].init.headers.Authorization, undefined, 'public uç: token gönderilmez');
+  assert.equal(calls[0].init.headers.Authorization, undefined, 'public endpoint: no token is sent');
   assert.deepEqual(seen, ['pending', 'processing', 'refunded']);
 });

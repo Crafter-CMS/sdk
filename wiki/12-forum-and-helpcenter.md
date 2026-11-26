@@ -1,31 +1,31 @@
-# 💬 Forum & Yardım Merkezi (`crafter.forum` & `crafter.helpcenter`)
+# 💬 Forum & Help Center (`crafter.forum` & `crafter.helpcenter`)
 
-Topluluk tartışmaları, rehberler, konu açma, mesajlaşma ve yardım merkezi SSS makalelerini yönetir.
+Handles community discussions, guides, opening topics, messaging and help center FAQ articles.
 
 ---
 
-## 📌 Forum Modülü (`crafter.forum`)
+## 📌 Forum Module (`crafter.forum`)
 
 ### 1. `getCategories()`
-Forum ana kategorilerini ve alt kategorilerini getirir.
+Fetches the forum's main categories and subcategories.
 
-* **HTTP Rota:** `GET /forum/categories`
-* **Dönüş:** `ForumCategory[]` (`id, name, slug, description, topics, subCategories`)
-* **Örnek:**
+* **HTTP Route:** `GET /forum/categories`
+* **Returns:** `ForumCategory[]` (`id, name, slug, description, topics, subCategories`)
+* **Example:**
   ```javascript
   const categories = await crafter.forum.getCategories();
   categories.forEach(cat => {
-    console.log(`[Kategori] ${cat.name} (${cat.topics?.length || 0} Konu)`);
+    console.log(`[Category] ${cat.name} (${cat.topics?.length || 0} topics)`);
   });
   ```
 
 ---
 
 ### 2. `getTopics(categoryId)` & `getTopic(topicId)`
-Bir kategorideki konuları veya belirli bir konunun tüm mesajlarını (replies) çeker.
+Fetches the topics in a category or all messages (replies) of a specific topic.
 
-* **HTTP Rota:** `GET /forum/category/:categoryId/topics` & `GET /forum/topic/:topicId`
-* **Dönüş:** `ForumTopic`
+* **HTTP Route:** `GET /forum/category/:categoryId/topics` & `GET /forum/topic/:topicId`
+* **Returns:** `ForumTopic`
   ```typescript
   interface ForumTopic {
     id: string;
@@ -48,56 +48,56 @@ Bir kategorideki konuları veya belirli bir konunun tüm mesajlarını (replies)
 ---
 
 ### 3. `createTopic(categoryId, data)`
-Belirtilen kategoriye yeni bir konu açar.
+Opens a new topic in the given category.
 
-* **HTTP Rota:** `POST /forum/category/:categoryId/topic`
-* **Girdi:** `{ title: string, content: string }`
-* **Örnek:**
+* **HTTP Route:** `POST /forum/category/:categoryId/topic`
+* **Input:** `{ title: string, content: string }`
+* **Example:**
   ```javascript
-  const topic = await crafter.forum.createTopic('rehberler-kategori-id', {
-    title: 'SkyBlock Ada Seviyesi Atlama Rehberi',
-    content: 'Bu rehberde adanızı en hızlı nasıl geliştireceğinizi anlatıyorum...'
+  const topic = await crafter.forum.createTopic('guides-category-id', {
+    title: 'SkyBlock Island Level-Up Guide',
+    content: 'In this guide I explain how to grow your island as fast as possible...'
   });
-  console.log('Konu açıldı:', topic.id);
+  console.log('Topic opened:', topic.id);
   ```
 
 ---
 
 ### 4. `addMessage(topicId, content)` & `replyMessage(messageId, content)`
-Konuya yeni bir cevap veya belirli bir cevaba alıntı yanıt gönderir.
+Sends a new reply to a topic or a quoted reply to a specific reply.
 
-* **HTTP Rota:** `POST /forum/topic/:topicId/message` ve `POST /forum/message/:messageId/reply`
-* **Örnek:**
+* **HTTP Route:** `POST /forum/topic/:topicId/message` and `POST /forum/message/:messageId/reply`
+* **Example:**
   ```javascript
-  await crafter.forum.addMessage('topic-123', 'Eline sağlık çok faydalı bir rehber olmuş.');
+  await crafter.forum.addMessage('topic-123', 'Great work, this guide is really helpful.');
   ```
 
 ---
 
 ### 5. `likeTopic(topicId)` & `unlikeTopic(topicId)`
-Konuyu beğenir veya beğeniyi geri çeker.
+Likes the topic or removes the like.
 
-* **HTTP Rota:** `POST /forum/topic/:topicId/like` & `DELETE /forum/topic/:topicId/like`
-* **Örnek:**
+* **HTTP Route:** `POST /forum/topic/:topicId/like` & `DELETE /forum/topic/:topicId/like`
+* **Example:**
   ```javascript
-  // Beğen:
+  // Like:
   await crafter.forum.likeTopic('topic-123');
 
-  // Beğeniyi geri al:
+  // Remove the like:
   await crafter.forum.unlikeTopic('topic-123');
   ```
 
 ---
 
-## ❓ Yardım Merkezi Modülü (`crafter.helpcenter`)
+## ❓ Help Center Module (`crafter.helpcenter`)
 
-Sunucu hakkında bilgi veren bilgi bankası makalelerini ve SSS (Sıkça Sorulan Sorular) listesini çeker.
+Fetches the knowledge base articles about the server and the FAQ (frequently asked questions) list.
 
 ### 6. `getOverview(query?)` / `getCategories(query?)`
-Yardım merkezinin ana sayfa vitrinini (kategoriler, öne çıkan makaleler ve SSS) tek seferde çeker.
+Fetches the help center home page showcase (categories, featured articles and FAQ) in one go.
 
-* **HTTP Rota:** `GET /helpcenter`
-* **Dönüş:**
+* **HTTP Route:** `GET /helpcenter`
+* **Returns:**
   ```typescript
   interface HelpcenterOverviewResponse {
     categories: Array<{ id: string; name: string; description?: string }>;
@@ -105,11 +105,11 @@ Yardım merkezinin ana sayfa vitrinini (kategoriler, öne çıkan makaleler ve S
     faqs: Array<{ id: string; question: string; answer: string }>;
   }
   ```
-* **Örnek:**
+* **Example:**
   ```javascript
   const overview = await crafter.helpcenter.getOverview();
 
-  // Sıkça Sorulan Soruları Ekrana Bas
+  // Print the frequently asked questions
   overview.faqs.forEach(faq => {
     console.log(`Q: ${faq.question}\nA: ${faq.answer}`);
   });
@@ -118,10 +118,10 @@ Yardım merkezinin ana sayfa vitrinini (kategoriler, öne çıkan makaleler ve S
 ---
 
 ### 7. `getCategory(categoryId)` & `getArticle(itemId)`
-Belirli bir yardım kategorisinin tüm makalelerini veya tek bir makalenin detayını getirir.
+Fetches all articles of a specific help category or the details of a single article.
 
-* **HTTP Rota:** `GET /helpcenter/category/:categoryId` & `GET /helpcenter/item/:itemId`
-* **Örnek:**
+* **HTTP Route:** `GET /helpcenter/category/:categoryId` & `GET /helpcenter/item/:itemId`
+* **Example:**
   ```javascript
   const article = await crafter.helpcenter.getArticle('item-123');
   document.querySelector('#article-content').innerHTML = article.content;

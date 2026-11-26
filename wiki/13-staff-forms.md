@@ -1,48 +1,48 @@
-# 📝 Yetkili Başvuru Formları (`crafter.staffForms`)
+# 📝 Staff Application Forms (`crafter.staffForms`)
 
-Sunucu için yetkili (Rehber, Moderatör, Mimar, Geliştirici vb.) alım formlarını listeleme, dinamik form alanlarını çizme ve başvuru gönderme süreçlerini yönetir.
+Handles listing staff recruitment forms for the server (helper, moderator, builder, developer, etc.), rendering dynamic form fields and submitting applications.
 
 ---
 
-## 📌 Metotlar ve Kullanım Örnekleri
+## 📌 Methods and Usage Examples
 
 ### 1. `list()`
-Açık ve aktif olan yetkili alım formlarını listeler.
+Lists the open and active staff recruitment forms.
 
-* **HTTP Rota:** `GET /staff-forms`
-* **Dönüş:** `StaffFormItem[]`
+* **HTTP Route:** `GET /staff-forms`
+* **Returns:** `StaffFormItem[]`
   ```typescript
   interface StaffFormInput {
-    id: string;             // Form input alanı ID'si
-    name: string;           // Soru başlığı (Örn: 'Günde kaç saat aktif olabilirsiniz?')
+    id: string;             // Form input field ID
+    name: string;           // Question title (e.g. 'How many hours a day can you be active?')
     type: 'text' | 'textarea' | 'number' | 'select' | 'radio' | 'checkbox';
-    index: number;          // Sıralama indeksi
+    index: number;          // Sort index
     required?: boolean;
   }
 
   interface StaffFormItem {
     id: string;
-    title: string;          // Örn: 'Rehber Alımları'
+    title: string;          // e.g. 'Helper Recruitment'
     description?: string;
     inputs: StaffFormInput[];
     isActive: boolean;
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   const forms = await crafter.staffForms.list();
   forms.forEach(f => {
-    console.log(`${f.title} (${f.inputs.length} Soru) -> /basvuru/${f.id}`);
+    console.log(`${f.title} (${f.inputs.length} questions) -> /apply/${f.id}`);
   });
   ```
 
 ---
 
 ### 2. `get(formId)`
-Tek bir başvuru formunun detayını ve tüm soru alanlarını çeker.
+Fetches the details of a single application form and all its question fields.
 
-* **HTTP Rota:** `GET /staff-forms/:formId`
-* **Örnek:**
+* **HTTP Route:** `GET /staff-forms/:formId`
+* **Example:**
   ```javascript
   const form = await crafter.staffForms.get('form-uuid');
   form.inputs.forEach(input => {
@@ -53,28 +53,28 @@ Tek bir başvuru formunun detayını ve tüm soru alanlarını çeker.
 ---
 
 ### 3. `apply(formId, answers)`
-Başvuru sorularının cevaplarını sunucuya gönderir.
+Sends the answers to the application questions to the server.
 
-SDK, cevapları **iki farklı formatta da** kabul eder ve backend'in beklediği `values: [{ inputId, value }]` formatına otomatik dönüştürür:
+The SDK accepts the answers in **two different formats** and converts them automatically to the `values: [{ inputId, value }]` format the backend expects:
 
-#### Format A: Key-Value Nesnesi (Önerilen En Kolay Kullanım)
+#### Format A: Key-Value Object (Recommended, Easiest)
 ```javascript
 await crafter.staffForms.apply('form-uuid', {
-  'input-id-yas': 19,
-  'input-id-deneyim': 'Daha önce 2 sunucuda modluk yaptım.',
+  'input-id-age': 19,
+  'input-id-experience': 'I was a moderator on 2 servers before.',
   'input-id-discord': 'soro#0001'
 });
 ```
 
-#### Format B: Dizi Formatı
+#### Format B: Array Format
 ```javascript
 await crafter.staffForms.apply('form-uuid', [
-  { inputId: 'input-id-yas', value: '19' },
-  { inputId: 'input-id-deneyim', value: '...' }
+  { inputId: 'input-id-age', value: '19' },
+  { inputId: 'input-id-experience', value: '...' }
 ]);
 ```
 
-* **Dönüş:**
+* **Returns:**
   ```typescript
   interface StaffFormApplicationResponse {
     id: string;

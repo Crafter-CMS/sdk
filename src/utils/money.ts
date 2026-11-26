@@ -1,7 +1,7 @@
 /**
- * Tutarı para birimi ve dile göre biçimlendirir (Intl.NumberFormat). Sembol ve ondalık hane para biriminden gelir;
- * 'TL' / '₺' sabit yazılmaz. `locale` verilmezse çalışma ortamının dili kullanılır.
- * Geçersiz para birimi / dil kodunda `1234.50 XYZ` biçimine düşer (hata fırlatmaz).
+ * Formats an amount by currency and language (Intl.NumberFormat). The symbol and decimals come from the currency;
+ * 'TL' / '₺' are never hard-coded. If `locale` is not given, the runtime's language is used.
+ * Falls back to `1234.50 XYZ` for an invalid currency / language code (never throws).
  *
  * @example formatMoney(9.99, 'USD', 'en-US') // '$9.99'
  * @example formatMoney(250, 'TRY', 'tr-TR')  // '₺250,00'

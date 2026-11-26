@@ -1,6 +1,6 @@
-// Tema çalışma zamanı birim testleri (#447): sepet, para, dil, bölüm render, checkout, olaylar, otomatik başlatma.
-// Derlenmiş paketi (dist) test eder. Sıfır bağımlılık: node:test + sahte window/document/localStorage/fetch.
-// Bütün değerler sentetiktir.
+// Theme runtime unit tests (#447): cart, money, language, section render, checkout, events, auto-start.
+// Tests the built package (dist). Zero dependencies: node:test + fake window/document/localStorage/fetch.
+// All values are synthetic.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -69,18 +69,18 @@ const context = {
   routes: { cart: '/de/cart', checkout: '/checkout', localization: '/localization' },
 };
 
-test('sürüm package.json ile aynı', () => {
+test('version matches package.json', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(SDK_VERSION, pkg.version);
   assert.equal(Crafter.version, pkg.version);
 });
 
-test('cart: ekle / güncelle / sil; localStorage "cart" checkout biçiminde; crafter:cart:updated', async () => {
+test('cart: add / update / remove; localStorage "cart" in checkout format; crafter:cart:updated', async () => {
   const { storage } = install({ context });
   const crafter = new Crafter({ context });
-  await crafter.cart.add({ id: 'p1', name: 'Ürün A', price: '10', discountType: 'percentage', discountValue: '10', image: '/a.png' });
-  await crafter.cart.add({ id: 'p1', name: 'Ürün A', price: 10 }, 2);
-  let cart = await crafter.cart.add({ id: 'p2', name: 'Ürün B', price: 5 });
+  await crafter.cart.add({ id: 'p1', name: 'Product A', price: '10', discountType: 'percentage', discountValue: '10', image: '/a.png' });
+  await crafter.cart.add({ id: 'p1', name: 'Product A', price: 10 }, 2);
+  let cart = await crafter.cart.add({ id: 'p2', name: 'Product B', price: 5 });
   const stored = JSON.parse(storage.getItem(CART_STORAGE_KEY));
   assert.deepEqual(Object.keys(stored[0]).sort(), ['discountType', 'discountValue', 'id', 'images', 'name', 'price', 'quantity']);
   assert.equal(stored[0].quantity, 3);
@@ -102,7 +102,7 @@ test('cart: ekle / güncelle / sil; localStorage "cart" checkout biçiminde; cra
   assert.deepEqual(counts, [1, 3, 4, 2, 1, 0]);
 });
 
-test('cart: bozuk kayıt boş sepet; eski "image" alanı okunur; kupon checkout anahtarında', async () => {
+test('cart: a corrupt record is an empty cart; the old "image" field is read; the coupon is in the checkout key', async () => {
   const { storage } = install();
   storage.setItem('cart', '{bozuk');
   const crafter = new Crafter();
@@ -119,7 +119,7 @@ test('cart: bozuk kayıt boş sepet; eski "image" alanı okunur; kupon checkout 
   await assert.rejects(() => crafter.cart.add({}), TypeError);
 });
 
-test('cart: başka sekmedeki değişiklik crafter:cart:updated yayar', async () => {
+test('cart: a change in another tab emits crafter:cart:updated', async () => {
   const { win, storage } = install();
   new Crafter();
   storage.setItem('cart', JSON.stringify([{ id: 'p1', price: 1, quantity: 2 }]));
@@ -130,7 +130,7 @@ test('cart: başka sekmedeki değişiklik crafter:cart:updated yayar', async () 
   assert.equal(domEvents.at(-1)[1].itemCount, 2);
 });
 
-test('money.format: bağlamın kuru ve dili; convert:false mağaza birimi; bağlamsız düz sayı', () => {
+test('money.format: the context rate and language; convert:false uses the store unit; plain number without a context', () => {
   install();
   const crafter = new Crafter({ context });
   assert.equal(crafter.money.currency, 'EUR');
@@ -138,17 +138,17 @@ test('money.format: bağlamın kuru ve dili; convert:false mağaza birimi; bağl
   assert.equal(crafter.money.format(20), new Intl.NumberFormat('de', { style: 'currency', currency: 'EUR' }).format(18.4));
   assert.equal(crafter.money.format(20, { convert: false }), new Intl.NumberFormat('de', { style: 'currency', currency: 'USD' }).format(20));
   assert.equal(crafter.money.format(5, { currency: 'GBP', locale: 'en-GB' }), '£5.00');
-  // JPY kuruşsuz: yuvarlama para biriminin hanesine
+  // JPY has no minor unit: rounding to the currency's decimals
   const yen = new Crafter({ context: { ...context, customerCurrency: 'JPY', rate: 151.237 } });
   assert.equal(yen.money.convert(1), 151);
-  // Kur geçersizse mağaza para birimi
+  // If the rate is invalid, the store currency
   const bad = new Crafter({ context: { ...context, rate: 0 } });
   assert.equal(bad.money.currency, 'USD');
   assert.equal(bad.money.convert(20), 20);
   assert.equal(new Crafter().money.format(3), '3.00');
 });
 
-test('localization.get ve set: POST /localization form alanları, JSON adresine gider, olay yayar', async () => {
+test('localization.get and set: POST /localization form fields, navigates to the JSON URL, emits the event', async () => {
   install({ pathname: '/de/store', search: '?page=2', context });
   const crafter = new Crafter({ context });
   assert.deepEqual(crafter.localization.get(), { language: 'de', currency: 'EUR', languages: ['en', 'de'], currencies: ['USD', 'EUR'] });
@@ -163,7 +163,7 @@ test('localization.get ve set: POST /localization form alanları, JSON adresine 
   assert.deepEqual(assigned, ['/store?page=2']);
   assert.deepEqual(domEvents.at(-1), ['localization', { language: 'en', currency: 'USD', url: '/store?page=2' }]);
 
-  // Dış adres kabul edilmez; reload:false gezinmez
+  // External URLs are not accepted; reload:false does not navigate
   queue.push({ status: 200, body: { location: '//evil.example' } });
   const safe = await crafter.localization.set({ currency: 'EUR' }, { reload: false, returnTo: '/cart' });
   assert.equal(safe.url, '/');
@@ -173,7 +173,7 @@ test('localization.get ve set: POST /localization form alanları, JSON adresine 
   await assert.rejects(() => crafter.localization.set({ language: 'en' }), /404/);
 });
 
-test('sections.render: ?sections= ile ister, sarmalayıcıyı değiştirir', async () => {
+test('sections.render: requests with ?sections=, replaces the wrapper', async () => {
   install({ pathname: '/store', search: '?sort=price' });
   const replaced = [];
   const current = { replaceWith: (next) => replaced.push(next.html) };
@@ -183,16 +183,16 @@ test('sections.render: ?sections= ile ister, sarmalayıcıyı değiştirir', asy
     Object.defineProperty(holder, 'innerHTML', { set(v) { holder.firstElementChild = { html: v }; } });
     return holder;
   };
-  queue.push({ status: 200, body: { main: '<div id="crafter-section-main">yeni</div>', 'header-group:announcement': '<div>d</div>', yok: null } });
+  queue.push({ status: 200, body: { main: '<div id="crafter-section-main">new</div>', 'header-group:announcement': '<div>d</div>', missing: null } });
   const crafter = new Crafter();
-  const result = await crafter.sections.render(['main', 'header-group:announcement', 'yok', 'main']);
-  assert.equal(calls[0].url, '/store?sort=price&sections=main%2Cheader-group%3Aannouncement%2Cyok');
-  assert.equal(result.yok, null);
-  assert.deepEqual(replaced, ['<div id="crafter-section-main">yeni</div>', '<div>d</div>']);
+  const result = await crafter.sections.render(['main', 'header-group:announcement', 'missing', 'main']);
+  assert.equal(calls[0].url, '/store?sort=price&sections=main%2Cheader-group%3Aannouncement%2Cmissing');
+  assert.equal(result.missing, null);
+  assert.deepEqual(replaced, ['<div id="crafter-section-main">new</div>', '<div>d</div>']);
   await assert.rejects(() => crafter.sections.render([]), /1-10/);
 });
 
-test('checkout: purpose=cart, bağlamın adresi, önizleme parametreleri korunur', () => {
+test('checkout: purpose=cart, the context URL, preview parameters are kept', () => {
   install({ pathname: '/de/cart', search: '?preview_theme_id=t1&x=1', context });
   const crafter = new Crafter({ context });
   assert.equal(crafter.checkout(), '/checkout?purpose=cart&preview_theme_id=t1');
@@ -208,10 +208,10 @@ test('stripLocalePrefix', () => {
   assert.equal(stripLocalePrefix('/cart', ''), '/cart');
 });
 
-test('IIFE: bağlam varsa window.Crafter hazır örnek, crafter:ready yayılır; yoksa sınıf kalır', () => {
+test('IIFE: with a context window.Crafter is a ready instance and crafter:ready is emitted; otherwise it stays the class', () => {
   const code = readFileSync(new URL('../dist/crafter.min.js', import.meta.url), 'utf8');
 
-  // Tarayıcıdaki gibi: betiğin global nesnesi window'un kendisi
+  // As in the browser: the script's global object is window itself
   const run = (win) => {
     Object.assign(win, { window: win, CustomEvent, URL, URLSearchParams, Intl, console, fetch, localStorage: globalThis.localStorage });
     vm.runInNewContext(code, win);

@@ -1,13 +1,13 @@
 import { CrafterError } from '../core/errors';
 
 export interface SectionsRenderOptions {
-  /** Bölümlerin render edileceği sayfa; varsayılan bulunulan sayfa (yol + sorgu) */
+  /** Page to render the sections for; defaults to the current page (path + query) */
   url?: string;
-  /** false: DOM'a dokunulmaz, yalnızca HTML döner */
+  /** false: the DOM is not touched, only the HTML is returned */
   swap?: boolean;
 }
 
-/** Storefront sınırı (#324) */
+/** Storefront limit (#324) */
 const MAX_SECTIONS = 10;
 
 /** 'header-group:announcement' → 'announcement' */
@@ -17,14 +17,14 @@ function instanceId(key: string): string {
 }
 
 /**
- * Bölüm render (#447): `?sections=a,b` ucundan bölümlerin güncel HTML'ini alır ve sayfadaki
- * `#crafter-section-<id>` sarmalayıcılarını yenisiyle değiştirir. Grup bölümleri `<grup>:<id>` ile istenir.
+ * Section rendering (#447): fetches the current HTML of the sections from the `?sections=a,b` endpoint and replaces the
+ * `#crafter-section-<id>` wrappers on the page with the new ones. Group sections are requested as `<group>:<id>`.
  */
 export class SectionsModule {
   public async render(ids: string[], options: SectionsRenderOptions = {}): Promise<Record<string, string | null>> {
     const list = Array.from(new Set((ids || []).map((id) => String(id).trim()).filter(Boolean)));
     if (list.length === 0 || list.length > MAX_SECTIONS) {
-      throw new CrafterError({ statusCode: 400, message: `sections.render: 1-${MAX_SECTIONS} bölüm` });
+      throw new CrafterError({ statusCode: 400, message: `sections.render: 1-${MAX_SECTIONS} sections` });
     }
     const base =
       options.url ?? (typeof window !== 'undefined' && window.location ? window.location.pathname + window.location.search : '/');

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -15,24 +15,24 @@
   <header class="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
       
-      <!-- Logo & Sunucu Durumu -->
+      <!-- Logo & Server Status -->
       <div class="flex items-center space-x-4">
         <a href="/" class="text-2xl font-black text-indigo-600 tracking-tight flex items-center gap-2">
           <span>⚡ CRAFTER</span>
         </a>
         <div id="server-badge" class="hidden sm:flex items-center gap-2 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-xs font-semibold border border-emerald-200">
           <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span id="server-online-text">Sunucu Durumu Yükleniyor...</span>
+          <span id="server-online-text">Loading server status...</span>
         </div>
       </div>
 
-      <!-- Canlı Autocomplete Arama Kutusu -->
+      <!-- Live Autocomplete Search Box -->
       <div class="relative flex-1 max-w-md">
         <div class="relative">
           <input
             type="text"
             id="search-input"
-            placeholder="Kullanıcı, ürün veya duyuru ara... (ör: vip)"
+            placeholder="Search users, products or posts... (e.g. vip)"
             class="w-full bg-gray-100 border border-gray-200 rounded-xl px-4 py-2 pl-10 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
           />
           <svg class="w-4 h-4 text-gray-400 absolute left-3 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -40,18 +40,18 @@
           </svg>
         </div>
 
-        <!-- Arama Dropdown Sonuçları -->
+        <!-- Search Dropdown Results -->
         <div id="search-dropdown" class="hidden absolute left-0 right-0 mt-2 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-50 divide-y divide-gray-50"></div>
       </div>
 
-      <!-- Kullanıcı & Bakiye Alanı -->
+      <!-- User & Balance Area -->
       <div class="flex items-center space-x-3">
         <div class="bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-xl flex items-center gap-2">
-          <span class="text-xs font-bold text-indigo-500 uppercase tracking-wider">Bakiye</span>
+          <span class="text-xs font-bold text-indigo-500 uppercase tracking-wider">Balance</span>
           <span id="header-balance" class="font-extrabold text-indigo-700 text-sm">--</span>
         </div>
         <button id="btn-login" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-xl text-sm font-bold shadow-md shadow-indigo-100 transition-all">
-          Giriş Yap
+          Log In
         </button>
       </div>
 
@@ -61,65 +61,65 @@
   <!-- ===================== MAIN CONTENT ===================== -->
   <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
 
-    <!-- In-Game /web Hızlı Giriş Bildirimi (Otomatik algılanır) -->
+    <!-- In-Game /web Quick Login Notice (detected automatically) -->
     <div id="ingame-auth-alert" class="hidden bg-indigo-600 text-white p-4 rounded-2xl shadow-lg flex items-center justify-between">
       <div class="flex items-center gap-3">
         <span class="text-2xl">🎮</span>
         <div>
-          <h3 class="font-bold">Oyun İçi Hızlı Giriş Algılandı</h3>
-          <p class="text-xs text-indigo-100">Minecraft sunucusundan tek tıkla geldiniz, hesabınız otomatik bağlanıyor...</p>
+          <h3 class="font-bold">In-Game Quick Login Detected</h3>
+          <p class="text-xs text-indigo-100">You came from the Minecraft server with one click; your account is being linked automatically...</p>
         </div>
       </div>
       <button id="btn-confirm-ingame" class="bg-white text-indigo-700 px-4 py-1.5 rounded-xl font-bold text-xs shadow hover:bg-indigo-50">
-        Onayla ve Devam Et
+        Confirm and Continue
       </button>
     </div>
 
-    <!-- 1. Bölüm: Mağaza Vitrini & Anında Satın Alma -->
+    <!-- Section 1: Store Showcase & Instant Purchase -->
     <section class="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm space-y-4">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-xl font-black text-gray-900 tracking-tight">🛒 Popüler Mağaza Ürünleri</h2>
-          <p class="text-sm text-gray-500">Site bakiyenizi kullanarak anında sunucunuza teslim alın.</p>
+          <h2 class="text-xl font-black text-gray-900 tracking-tight">🛒 Popular Store Products</h2>
+          <p class="text-sm text-gray-500">Use your site balance to get it delivered to your server instantly.</p>
         </div>
         <span class="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-lg font-bold">
-          ⚡ Anında Otomatik Teslimat
+          ⚡ Instant Automatic Delivery
         </span>
       </div>
 
       <div id="products-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 pt-2">
-        <!-- Örnek Vitrin Kartı -->
+        <!-- Sample Showcase Card -->
         <div class="border border-gray-100 bg-gray-50/50 rounded-2xl p-5 flex flex-col justify-between hover:shadow-md transition-shadow">
           <div>
             <div class="flex justify-between items-start mb-2">
-              <h3 class="font-bold text-gray-900 text-lg">VIP+ Paketi</h3>
-              <span class="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-md font-bold">30 Günlük</span>
+              <h3 class="font-bold text-gray-900 text-lg">VIP+ Package</h3>
+              <span class="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-md font-bold">30 Days</span>
             </div>
-            <p class="text-xs text-gray-500 mb-4">Özel uçma yetkisi, 5 adet set ve sohbette sarı parlak unvan.</p>
+            <p class="text-xs text-gray-500 mb-4">Special flight permission, 5 kits and a shiny yellow title in chat.</p>
           </div>
           <div class="pt-4 border-t border-gray-100 flex items-center justify-between">
             <span class="text-lg font-black text-indigo-600" data-price="75">75</span>
             <button onclick="handlePurchase('prod-vip-plus')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-sm">
-              Hemen Satın Al
+              Buy Now
             </button>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- 2. Bölüm: Lexical Zengin Metin Duyurusu -->
+    <!-- Section 2: Lexical Rich Text Announcement -->
     <section class="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm space-y-4">
       <div class="flex items-center justify-between border-b border-gray-100 pb-3">
         <div>
-          <span class="text-xs font-bold uppercase text-indigo-600 tracking-wider">Son Güncelleme</span>
-          <h2 class="text-xl font-black text-gray-900 tracking-tight">Yeni Sezon & Orman Dünyası Açıldı!</h2>
+          <span class="text-xs font-bold uppercase text-indigo-600 tracking-wider">Latest Update</span>
+          <h2 class="text-xl font-black text-gray-900 tracking-tight">New Season & Forest World Is Open!</h2>
         </div>
-        <span class="text-xs text-gray-400">1 Eylül 2026</span>
+        <span class="text-xs text-gray-400">September 1, 2026</span>
       </div>
 
       <!-- Lexical HTML Buraya Enjekte Edilecek -->
       <article id="lexical-announcement-body" class="prose max-w-none text-sm text-gray-700 leading-relaxed">
-        Yükleniyor...
+        Loading...
       </article>
     </section>
 
@@ -127,10 +127,10 @@
 
   <!-- ===================== JAVASCRIPT LOGIC ===================== -->
   <script>
-    // 1. Crafter SDK Başlatma (Sıfır konfigürasyon: Otomatik Storefront Proxy Modu)
+    // 1. Start the Crafter SDK (zero configuration: automatic Storefront Proxy mode)
     const crafter = new Crafter();
 
-    // 2. Canlı Sunucu Durumunu Çek
+    // 2. Fetch the live server status
     async function loadServerStatus() {
       try {
         const servers = await crafter.servers.getList();
@@ -139,25 +139,25 @@
           const badge = document.querySelector('#server-badge');
           const text = document.querySelector('#server-online-text');
           badge.classList.remove('hidden');
-          text.innerText = `${mainServer.name}: ${mainServer.onlinePlayers || 0} / ${mainServer.maxPlayers || 100} Oyuncu Aktif (${mainServer.ping || 18}ms)`;
+          text.innerText = `${mainServer.name}: ${mainServer.onlinePlayers || 0} / ${mainServer.maxPlayers || 100} Players Online (${mainServer.ping || 18}ms)`;
         }
       } catch (err) {
-        console.warn('Sunucu durumu alınamadı:', err.message);
+        console.warn('Could not fetch server status:', err.message);
       }
     }
 
-    // 3. Kullanıcı Hafif Bakiyesini Çek
+    // 3. Fetch the user's lightweight balance
     async function refreshUserBalance() {
       try {
         const balanceData = await crafter.users.getBalance('me');
         const { balance, currency } = balanceData.data || balanceData;
         document.querySelector('#header-balance').innerText = Crafter.utils.formatMoney(balance, currency);
       } catch {
-        document.querySelector('#header-balance').innerText = 'Giriş Yapılmadı';
+        document.querySelector('#header-balance').innerText = 'Not logged in';
       }
     }
 
-    // 4. Navbar Canlı Autocomplete Arama (crafter.search)
+    // 4. Live navbar autocomplete search (crafter.search)
     const searchInput = document.querySelector('#search-input');
     const searchDropdown = document.querySelector('#search-dropdown');
     let searchDebounceTimer;
@@ -175,7 +175,7 @@
         try {
           const results = await crafter.search.metadataSearch(query, 5);
           if (!results || results.length === 0) {
-            searchDropdown.innerHTML = '<div class="p-4 text-xs text-gray-400 text-center">Sonuç bulunamadı</div>';
+            searchDropdown.innerHTML = '<div class="p-4 text-xs text-gray-400 text-center">No results found</div>';
             searchDropdown.classList.remove('hidden');
             return;
           }
@@ -189,31 +189,31 @@
                   <div class="text-xs text-gray-400">${item.subtitle || ''}</div>
                 </div>
               </div>
-              <span class="text-xs text-indigo-600 font-semibold">Görüntüle →</span>
+              <span class="text-xs text-indigo-600 font-semibold">View →</span>
             </div>
           `).join('');
           searchDropdown.classList.remove('hidden');
         } catch (err) {
-          console.error('Arama hatası:', err);
+          console.error('Search error:', err);
         }
       }, 250);
     });
 
-    // 5. Bakiye ile Ürün Satın Alma (crafter.cart)
+    // 5. Buy a product with balance (crafter.cart)
     async function handlePurchase(productId) {
-      if (!confirm('Bu ürünü satın almak istiyor musunuz?')) return;
+      if (!confirm('Do you want to buy this product?')) return;
 
       try {
         const res = await crafter.cart.purchase({ productIds: [productId] });
         alert('Tebrikler: ' + res.message);
       } catch (err) {
-        alert('Satın alım başarısız: ' + err.message);
+        alert('Purchase failed: ' + err.message);
       }
     }
 
-    // 6. Lexical Zengin Metin Örneğini Render Et (crafter.utils.lexicalToHtml)
+    // 6. Render the Lexical rich text sample (crafter.utils.lexicalToHtml)
     function renderLexicalAnnouncement() {
-      // Örnek bir Lexical AST nesnesi (Backend'den gelen veri)
+      // A sample Lexical AST object (data from the backend)
       const mockLexicalPost = {
         root: {
           type: 'root',
@@ -221,9 +221,9 @@
             {
               type: 'paragraph',
               children: [
-                { type: 'text', text: 'Değerli oyuncularımız, ', format: 0 },
-                { type: 'text', text: '1.20 Survival Orman Dünyası', format: 1 }, // Bold
-                { type: 'text', text: ' bugün saat 20:00 itibarıyla resmi olarak açılmıştır!', format: 0 }
+                { type: 'text', text: 'Dear players, ', format: 0 },
+                { type: 'text', text: 'the 1.20 Survival Forest World', format: 1 }, // Bold
+                { type: 'text', text: ' officially opened today at 20:00!', format: 0 }
               ]
             },
             {
@@ -233,15 +233,15 @@
                 {
                   type: 'listitem',
                   children: [
-                    { type: 'text', text: 'Yeni özel madenler ve zindanlar eklendi.', format: 0 }
+                    { type: 'text', text: 'New special mines and dungeons were added.', format: 0 }
                   ]
                 },
                 {
                   type: 'listitem',
                   children: [
-                    { type: 'text', text: 'Tüm mağaza alışverişlerinde ', format: 0 },
-                    { type: 'text', text: '%25 açılış indirimi', format: 1 | 8 }, // Bold + Underline
-                    { type: 'text', text: ' başladı!', format: 0 }
+                    { type: 'text', text: 'A ', format: 0 },
+                    { type: 'text', text: '25% launch discount', format: 1 | 8 }, // Bold + Underline
+                    { type: 'text', text: ' on all store purchases has started!', format: 0 }
                   ]
                 }
               ]
@@ -250,12 +250,12 @@
         }
       };
 
-      // SDK Lexical motoruyla HTML'e çevir:
+      // Convert to HTML with the SDK Lexical engine:
       const html = crafter.utils.lexicalToHtml(mockLexicalPost);
       document.querySelector('#lexical-announcement-body').innerHTML = html;
     }
 
-    // 7. Oyun İçi (/web) Hızlı Giriş Kontrolü
+    // 7. In-game (/web) quick login check
     async function checkInGameLogin() {
       const params = new URLSearchParams(window.location.search);
       if (params.get('username') && params.get('uuid') && params.get('hash')) {
@@ -263,29 +263,29 @@
         document.querySelector('#btn-confirm-ingame').addEventListener('click', async () => {
           try {
             await crafter.auth.inGameAuth();
-            alert('Giriş başarılı! Hoş geldiniz.');
-            window.location.href = window.location.pathname; // Parametreleri temizle
+            alert('Login successful! Welcome.');
+            window.location.href = window.location.pathname; // Clear the parameters
           } catch (err) {
-            alert('Giriş başarısız: ' + err.message);
+            alert('Login failed: ' + err.message);
           }
         });
       }
     }
 
-    // ===================== REAKTİF EVENT LİSTENERLAR =====================
-    // Satın alım tamamlandığında header bakiyesini otomatik yenile:
+    // ===================== REACTIVE EVENT LISTENERS =====================
+    // Refresh the header balance automatically when a purchase completes:
     crafter.on('cart:purchased', (order) => {
-      console.log('⚡ cart:purchased olayı yakalandı:', order);
+      console.log('⚡ cart:purchased event caught:', order);
       refreshUserBalance();
     });
 
-    // Başka bir oyuncuya bakiye transfer edildiğinde:
+    // When balance is transferred to another player:
     crafter.on('balance:sent', (transfer) => {
-      console.log('⚡ balance:sent olayı yakalandı:', transfer);
+      console.log('⚡ balance:sent event caught:', transfer);
       refreshUserBalance();
     });
 
-    // Fiyatlar mağaza para biriminde biçimlendirilir (sabit 'TL' / '₺' yazılmaz)
+    // Prices are formatted in the store currency (no hard-coded 'TL' / '₺')
     async function renderPrices() {
       try {
         const { currency } = await crafter.website.getInfo();
@@ -293,11 +293,11 @@
           el.textContent = Crafter.utils.formatMoney(el.dataset.price, currency);
         });
       } catch (err) {
-        console.warn('Site bilgisi alınamadı:', err.message);
+        console.warn('Could not fetch site info:', err.message);
       }
     }
 
-    // Sayfa Yüklendiğinde Başlat
+    // Start when the page loads
     window.addEventListener('DOMContentLoaded', () => {
       renderPrices();
       loadServerStatus();

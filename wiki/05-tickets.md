@@ -1,16 +1,16 @@
-# 🎫 Destek Talepleri Modülü (`crafter.tickets`)
+# 🎫 Support Tickets Module (`crafter.tickets`)
 
-Kullanıcıların site üzerinden yetkililere destek talebi açmasını, mesajlaşmasını, biletleri kapatmasını ve yeniden açmasını yönetir.
+Lets users open support tickets to the staff through the site, exchange messages, and close and reopen tickets.
 
 ---
 
-## 📌 Metotlar ve Kullanım Örnekleri
+## 📌 Methods and Usage Examples
 
 ### 1. `list()` & `get(ticketId)`
-Kullanıcının tüm destek biletlerini veya belirli bir biletin tüm yazışma geçmişini getirir.
+Fetches all of the user's support tickets or the full message history of a single ticket.
 
-* **HTTP Rota:** `GET /v2/tickets` & `GET /v2/tickets/:ticketId`
-* **Dönüş:** `Ticket[]` / `Ticket`
+* **HTTP Route:** `GET /v2/tickets` & `GET /v2/tickets/:ticketId`
+* **Returns:** `Ticket[]` / `Ticket`
   ```typescript
   interface Ticket {
     id: string;
@@ -31,7 +31,7 @@ Kullanıcının tüm destek biletlerini veya belirli bir biletin tüm yazışma 
     updatedAt?: string;
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   const tickets = await crafter.tickets.list();
   tickets.forEach(ticket => {
@@ -42,11 +42,11 @@ Kullanıcının tüm destek biletlerini veya belirli bir biletin tüm yazışma 
 ---
 
 ### 2. `getCategories()`
-Destek bileti oluştururken seçilebilecek departman/kategori listesini getirir.
+Fetches the department/category list to choose from when creating a support ticket.
 
-* **HTTP Rota:** `GET /v2/tickets/categories`
-* **Dönüş:** `TicketCategory[]` (`id, name, description`)
-* **Örnek:**
+* **HTTP Route:** `GET /v2/tickets/categories`
+* **Returns:** `TicketCategory[]` (`id, name, description`)
+* **Example:**
   ```javascript
   const categories = await crafter.tickets.getCategories();
   const select = document.querySelector('#category-select');
@@ -61,50 +61,50 @@ Destek bileti oluştururken seçilebilecek departman/kategori listesini getirir.
 ---
 
 ### 3. `create(data)`
-Yeni bir destek talebi oluşturur.
+Creates a new support ticket.
 
-* **HTTP Rota:** `POST /v2/tickets`
-* **Girdi:**
+* **HTTP Route:** `POST /v2/tickets`
+* **Input:**
   ```typescript
   interface CreateTicketDto {
     title: string;
-    categoryId: string; // Zorunlu!
+    categoryId: string; // Required!
     message: string;
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   const newTicket = await crafter.tickets.create({
-    title: 'Ödeme yaptıktan sonra kredim gelmedi',
-    categoryId: 'finans-kategori-id',
-    message: 'Merhaba, 10 dakika önce PayTR üzerinden ödeme yaptım ancak bakiyem güncellenmedi.'
+    title: 'My credit did not arrive after paying',
+    categoryId: 'billing-category-id',
+    message: 'Hello, I paid via PayTR 10 minutes ago but my balance was not updated.'
   });
 
-  console.log('Bilet açıldı, ID:', newTicket.id);
+  console.log('Ticket opened, ID:', newTicket.id);
   ```
 
 ---
 
 ### 4. `reply(ticketId, message)`
-Açık olan bir destek talebine yeni bir yanıt mesajı gönderir.
+Sends a new reply message to an open support ticket.
 
-* **HTTP Rota:** `POST /v2/tickets/:ticketId/reply`
-* **Örnek Kullanım:**
+* **HTTP Route:** `POST /v2/tickets/:ticketId/reply`
+* **Example usage:**
   ```javascript
-  const updatedTicket = await crafter.tickets.reply('ticket-123', 'Dekont ektedir: https://...');
+  const updatedTicket = await crafter.tickets.reply('ticket-123', 'The receipt is attached: https://...');
   ```
 
 ---
 
 ### 5. `close(ticketId, reason?)` & `open(ticketId)`
-Destek biletini kapatır veya çözülememişse yeniden açar.
+Closes the support ticket, or reopens it if it was not resolved.
 
-* **HTTP Rota:** `POST /v2/tickets/:ticketId/close` & `POST /v2/tickets/:ticketId/open`
-* **Örnek Kullanım:**
+* **HTTP Route:** `POST /v2/tickets/:ticketId/close` & `POST /v2/tickets/:ticketId/open`
+* **Example usage:**
   ```javascript
-  // Talebi kapat:
-  await crafter.tickets.close('ticket-123', 'Sorunum çözüldü, teşekkürler.');
+  // Close the ticket:
+  await crafter.tickets.close('ticket-123', 'My issue is resolved, thanks.');
 
-  // Yeniden aç:
+  // Reopen:
   await crafter.tickets.open('ticket-123');
   ```

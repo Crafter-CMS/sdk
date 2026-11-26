@@ -12,7 +12,7 @@
 import { Crafter } from '../src';
 
 async function main() {
-  console.log('🎫 Crafter Destek ve Forum İş Akışı Başlatılıyor...\n');
+  console.log('🎫 Starting the Crafter support and forum workflow...\n');
 
   const crafter = new Crafter({
     mode: 'direct',
@@ -22,73 +22,73 @@ async function main() {
 
   // 1. Reaktif Event Dinleyicilerini Kur
   crafter.on('ticket:created', (ticket) => {
-    console.log(`⚡ [EVENT] Yeni Destek Talebi Açıldı: #${ticket.id.slice(0, 8)} - ${ticket.title}`);
+    console.log(`⚡ [EVENT] New support ticket opened: #${ticket.id.slice(0, 8)} - ${ticket.title}`);
   });
 
   crafter.on('ticket:closed', (event) => {
-    console.log(`⚡ [EVENT] Destek Talebi Kapatıldı: #${event.ticketId.slice(0, 8)} (Sebep: ${event.reason || 'Yok'})`);
+    console.log(`⚡ [EVENT] Support ticket closed: #${event.ticketId.slice(0, 8)} (Reason: ${event.reason || 'None'})`);
   });
 
   crafter.on('forum:topic_created', (topic) => {
-    console.log(`⚡ [EVENT] Forumda Yeni Konu Açıldı: [${topic.title}]`);
+    console.log(`⚡ [EVENT] New forum topic opened: [${topic.title}]`);
   });
 
   crafter.on('forum:topic_liked', (event) => {
-    console.log(`⚡ [EVENT] Konu Beğenildi! ID: ${event.topicId} (Toplam Beğeni: ${event.likeCount})`);
+    console.log(`⚡ [EVENT] Topic liked! ID: ${event.topicId} (Total likes: ${event.likeCount})`);
   });
 
   try {
-    // 2. Destek Kategorilerini Listele
-    console.log('📌 1. Destek Departmanları Alınıyor:');
+    // 2. List support categories
+    console.log('📌 1. Fetching support departments:');
     const categories = await crafter.tickets.getCategories();
-    console.log(`   - Bulunan Kategori Sayısı: ${categories.length}`);
+    console.log(`   - Categories found: ${categories.length}`);
     categories.forEach((c) => console.log(`     * [${c.name}] - ID: ${c.id}`));
     console.log();
 
-    // 3. Yeni Destek Talebi Açma (Düz string metin otomatik Lexical formatına sarılır)
-    console.log('📌 2. Yeni Destek Talebi Gönderiliyor:');
+    // 3. Open a new support ticket (plain string text is wrapped into Lexical format automatically)
+    console.log('📌 2. Sending a new support ticket:');
     const newTicket = await crafter.tickets.create({
-      title: 'Hesap Güvenliği Hakkında',
+      title: 'About Account Security',
       categoryId: categories[0]?.id || 'cat-general',
-      // Düz string metin gönderiyoruz; SDK bunu arka planda Lexical AST'sine çevirir!
-      message: 'Merhaba yetkili ekibi,\nHesabımda iki adımlı doğrulamayı açmak istiyorum fakat Discord kodum gelmedi.\nYardımcı olabilir misiniz?',
+      // We send plain string text; the SDK converts it into a Lexical AST behind the scenes!
+      message: 'Hello staff team,\nI want to enable two-factor authentication on my account but my Discord code never arrived.\nCould you help?',
     });
-    console.log(`   - Bilet Oluşturuldu: #${newTicket.id}`);
+    console.log(`   - Ticket created: #${newTicket.id}`);
     console.log();
 
-    // 4. Bilete Yanıt Gönderme
-    console.log('📌 3. Bilete Yanıt Ekleniyor:');
-    await crafter.tickets.reply(newTicket.id, 'Ek bilgi: Discord kullanıcı adım Steve#1234.');
-    console.log('   - Yanıt başarıyla iletildi.');
+    // 4. Reply to the ticket
+    console.log('📌 3. Adding a reply to the ticket:');
+    await crafter.tickets.reply(newTicket.id, 'Additional info: my Discord username is Steve#1234.');
+    console.log('   - Reply sent.');
     console.log();
 
-    // 5. Bileti Kapatma
-    console.log('📌 4. Bilet Kapatılıyor:');
-    await crafter.tickets.close(newTicket.id, 'Sorun çözüldü.');
-    console.log('   - Bilet kapatıldı.');
+    // 5. Close the ticket
+    console.log('📌 4. Closing the ticket:');
+    await crafter.tickets.close(newTicket.id, 'Issue resolved.');
+    console.log('   - Ticket closed.');
     console.log();
 
-    // 6. Forum Kategorileri ve Konu Açma
-    console.log('📌 5. Forum Kategorileri Alınıyor:');
+    // 6. Forum categories and opening a topic
+    console.log('📌 5. Fetching forum categories:');
     const forumCategories = await crafter.forum.getCategories();
     if (forumCategories.length > 0) {
       const firstCat = forumCategories[0];
-      console.log(`   - Seçilen Kategori: ${firstCat.name}`);
+      console.log(`   - Selected category: ${firstCat.name}`);
 
-      // Yeni Konu Açma
-      console.log('   - Yeni Konu Açılıyor:');
+      // Open a new topic
+      console.log('   - Opening a new topic:');
       const topic = await crafter.forum.createTopic(firstCat.id, {
-        title: 'Klan Savaşı Stratejileri',
-        content: 'Bu konuda en iyi klan savaş dizilimlerini tartışıyoruz.\nSizce en iyi savunma nasıl olmalı?',
+        title: 'Clan War Strategies',
+        content: 'In this topic we discuss the best clan war formations.\nWhat do you think the best defense looks like?',
       });
 
-      // Konuyu Beğenme
-      console.log('   - Konu Beğeniliyor:');
+      // Like the topic
+      console.log('   - Liking the topic:');
       await crafter.forum.likeTopic(topic.id);
     }
 
   } catch (err: any) {
-    console.warn('ℹ️ API Çağrısı Sonucu (Beklenen kimlik doğrulama veya demo yanıtı):', err.message);
+    console.warn('ℹ️ API call result (expected authentication or demo response):', err.message);
   }
 }
 

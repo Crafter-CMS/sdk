@@ -1,49 +1,49 @@
 /**
- * Sayfa bağlamı (#447): storefront her v2 tema sayfasına `content_for_header` ile
- * `window.__CRAFTER_CONTEXT__` yazar. Gizli bilgi ve kişisel veri içermez; yalnızca mağaza, dil ve para birimi.
- * IIFE derlemesi bu nesneyi görünce `window.Crafter` örneğini kendiliğinden kurar (bkz. `autoInit`).
+ * Page context (#447): the storefront writes `window.__CRAFTER_CONTEXT__` into every v2 theme page with
+ * `content_for_header`. It holds no secrets or personal data; only the store, language and currency.
+ * When the IIFE build sees this object it sets up the `window.Crafter` instance by itself (see `autoInit`).
  */
 export interface CrafterPageContext {
-  /** Bağlamı yazan storefront'un eklediği SDK sürümü */
+  /** SDK version added by the storefront that wrote the context */
   sdkVersion?: string;
   websiteId?: string;
-  /** Aynı kökenli proxy; varsayılan '/api/storefront' */
+  /** Same-origin proxy; default '/api/storefront' */
   apiBase?: string;
-  /** Sayfanın dili (ör. 'en', 'pt-BR') */
+  /** Page language (e.g. 'en', 'pt-BR') */
   locale?: string;
-  /** Mağazanın varsayılan dili */
+  /** The store's default language */
   defaultLocale?: string;
-  /** Sayfa adresinin dil öneki: varsayılan dilde '', diğerlerinde '/en' */
+  /** Language prefix of the page URL: '' for the default language, '/en' for the others */
   localePrefix?: string;
-  /** Mağazanın açık dilleri */
+  /** The store's enabled languages */
   languages?: string[];
-  /** Mağaza para birimi (muhasebe birimi); tutarlar bu birimde tutulur */
+  /** Store currency (accounting unit); amounts are kept in this unit */
   storeCurrency?: string;
-  /** Müşterinin para birimi; yoksa mağaza para birimi */
+  /** The customer's currency; the store currency if absent */
   customerCurrency?: string;
-  /** 1 mağaza birimi = rate müşteri birimi (yalnızca gösterim) */
+  /** 1 store unit = rate customer units (display only) */
   rate?: number;
-  /** Seçicideki para birimleri */
+  /** Currencies in the selector */
   currencies?: string[];
-  /** Platform adresleri; checkout dil önekiyle çalışmaz, dili Referer'dan okur */
+  /** Platform URLs; checkout does not use the language prefix, it reads the language from the Referer */
   routes?: {
     cart?: string;
     checkout?: string;
     localization?: string;
-    /** Storefront sepet uçlarının kökü (#434), ör. '/cart' → `/cart.js`, `/cart/add.js`. Yoksa sepet localStorage'da. */
+    /** Root of the storefront cart endpoints (#434), e.g. '/cart' → `/cart.js`, `/cart/add.js`. If absent the cart lives in localStorage. */
     cartApi?: string;
   };
 }
 
 export const CONTEXT_GLOBAL = '__CRAFTER_CONTEXT__';
 
-/** `window.__CRAFTER_CONTEXT__` okunur; yoksa ya da nesne değilse null */
+/** Reads `window.__CRAFTER_CONTEXT__`; null if missing or not an object */
 export function readPageContext(win: any = typeof window !== 'undefined' ? window : undefined): CrafterPageContext | null {
   const raw = win?.[CONTEXT_GLOBAL];
   return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as CrafterPageContext) : null;
 }
 
-/** Dil önekini yoldan çıkarır: '/en/cart' → '/cart' (önek '/en' iken) */
+/** Strips the language prefix from the path: '/en/cart' → '/cart' (when the prefix is '/en') */
 export function stripLocalePrefix(pathname: string, prefix: string | undefined): string {
   if (!prefix || prefix === '/') return pathname || '/';
   if (pathname === prefix) return '/';

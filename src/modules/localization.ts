@@ -3,9 +3,9 @@ import { CrafterError } from '../core/errors';
 import { DomEvents } from '../core/dom-events';
 
 export interface LocalizationState {
-  /** Sayfanın dili */
+  /** Page language */
   language: string;
-  /** Müşterinin para birimi; yoksa mağaza para birimi */
+  /** The customer's currency; the store currency if absent */
   currency: string;
   languages: string[];
   currencies: string[];
@@ -17,13 +17,13 @@ export interface LocalizationChange {
 }
 
 export interface LocalizationSetOptions {
-  /** Seçimden sonra dönülecek uygulama içi yol (öneksiz); varsayılan bulunulan sayfa */
+  /** In-app path to return to after the choice (without prefix); defaults to the current page */
   returnTo?: string;
-  /** false: sayfa yenilenmez, yalnızca adres döner (tema kendisi yönetir). Varsayılan true. */
+  /** false: the page is not reloaded, only the URL is returned (the theme handles it). Default true. */
   reload?: boolean;
 }
 
-/** Yalnızca aynı sitedeki yol (storefront `safeReturnTo` ile aynı kural) */
+/** Only a path on the same site (same rule as the storefront's `safeReturnTo`) */
 function safePath(value: unknown): string {
   if (typeof value !== 'string' || !value.trim()) return '/';
   const path = value.trim();
@@ -32,8 +32,8 @@ function safePath(value: unknown): string {
 }
 
 /**
- * Dil ve para birimi (#447). Seçim storefront'un JS'siz formuyla aynı uca gider: `POST /localization`
- * (`language`, `currency`, `return_to`). Sunucu seçimi çereze yazar ve sayfanın seçilen dildeki adresini verir.
+ * Language and currency (#447). The choice goes to the same endpoint as the storefront's no-JS form: `POST /localization`
+ * (`language`, `currency`, `return_to`). The server writes the choice to a cookie and returns the page URL in the chosen language.
  */
 export class LocalizationModule {
   constructor(private getContext: () => CrafterPageContext | null, private dom: DomEvents) {}
@@ -51,8 +51,8 @@ export class LocalizationModule {
   }
 
   /**
-   * Dili ve/veya para birimini değiştirir. Varsayılan olarak sayfa seçilen dildeki adrese gider.
-   * `crafter:localization:changed` olayı (`{ language, currency, url }`) gezinmeden önce yayılır.
+   * Changes the language and/or currency. By default the page navigates to the URL in the chosen language.
+   * The `crafter:localization:changed` event (`{ language, currency, url }`) is emitted before navigating.
    */
   public async set(change: LocalizationChange, options: LocalizationSetOptions = {}): Promise<{ url: string }> {
     const ctx = this.getContext();
@@ -83,13 +83,13 @@ export class LocalizationModule {
       const data: any = await response.json().catch(() => null);
       if (data && typeof data.location === 'string') url = safePath(data.location);
     }
-    // Eski storefront: 303 izlenir, son adres sayfanın seçilen dildeki hali
+    // Old storefront: the 303 is followed, the final URL is the page in the chosen language
     if (!url && response.redirected && response.url) {
       try {
         const final = new URL(response.url);
         url = safePath(final.pathname + final.search);
       } catch {
-        // yok sayılır
+        // ignored
       }
     }
     if (!url) url = returnTo;
@@ -107,7 +107,7 @@ export class LocalizationModule {
   }
 }
 
-/** Bulunulan sayfanın öneksiz yolu + sorgu */
+/** Unprefixed path + query of the current page */
 function currentPath(ctx: CrafterPageContext | null): string {
   if (typeof window === 'undefined' || !window.location) return '/';
   return stripLocalePrefix(window.location.pathname, ctx?.localePrefix) + (window.location.search || '');
