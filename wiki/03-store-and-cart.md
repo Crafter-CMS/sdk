@@ -101,7 +101,10 @@ değişiklikte `crafter:cart:updated` yayılır.
 - **Storefront içinde** (sayfa bağlamında `routes.cartApi` varsa, SDK 1.5.0+): sepet storefront'un `/cart.js`,
   `/cart/add.js`, `/cart/change.js`, `/cart/clear.js`, `/cart/coupon.js` uçlarındadır. Ziyaretçide imzalı `httpOnly`
   çerezde, giriş/kayıtta hesaba katılır ve cihazlar arası aynı kalır. Fiyat gönderilmez; sunucu güncel üründen hesaplar
-  (`add({ id })` yeterli). Eski localStorage sepeti ilk işlemde bir kez sunucuya taşınır. Sekmeler arası
+  (`add({ id })` yeterli). localStorage sepeti (`cart`: v1 tema, eski SDK) sayfa başına bir kez, ilk işlemden önce
+  sunucu sepetiyle eşitlenir (1.5.2+): son eşitlenen hal `crafter_cart_synced` kaydındadır; ondan sonra eklenen ya da
+  adedi değişen satır sunucuda o adede ayarlanır (toplanmaz), `cart`'tan çıkarılan satır sunucudan da düşer, değişmeyen
+  satır gönderilmez. Sunucu sepeti dolu olsa da yeni seçim kaybolmaz; tekrar çalışması adetleri katlamaz. Sekmeler arası
   `crafter_cart_sync` sinyaliyle güncellenir. Hata: `CrafterError` (`409 cart_product_unavailable`, `422 cart_full`,
   `503 cart_unavailable`).
 - **Headless** (bağlam yoksa): localStorage `cart` / `crafter_cart_coupon`; fiyat `add()` ile verilen değerdir.

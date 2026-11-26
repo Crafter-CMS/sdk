@@ -1,12 +1,13 @@
 import { CrafterError } from '../core/errors';
-import { CART_COUPON_KEY, CART_STORAGE_KEY, normalizeLines } from './cart-store';
+import { CART_COUPON_KEY, CART_STORAGE_KEY, CART_SYNCED_KEY, normalizeLines } from './cart-store';
 
 /**
  * Hibrit sepet (#434): storefront'un sepet uçları. Ziyaretçide sepet storefront'un imzalı çerezinde, giriş yapmış
  * müşteride sunucuda tutulur; SDK iki modu ayırt etmez. Uçlar aynı kökenli ve çerezlidir (`credentials: 'same-origin'`).
  * Fiyat gönderilmez: sunucu güncel üründen hesaplar.
  *   GET  /cart.js
- *   POST /cart/add.js     { id, quantity, options? } | { items: [{ id, quantity }] }
+ *   POST /cart/add.js     { id, quantity, options? } | { items: [{ id, quantity }], replace? }
+ *                         (`replace: true`: adet verilen değere ayarlanır, toplanmaz; localStorage eşitlemesi kullanır)
  *   POST /cart/change.js  { id, quantity }   (0 siler; id ürün id'si ya da satır anahtarı)
  *   POST /cart/clear.js
  *   POST /cart/coupon.js  { code | null }  (geçersiz kupon 422 + `type`, sepet değişmez; null / '' kaldırır)
@@ -168,8 +169,76 @@ export function normalizeServerCart(raw: any): ServerCartResponse {
   };
 }
 
+/** localStorage sepetinin eşitlemede kullanılan hali: yalnızca ürün id + adet (fiyat sunucuda hesaplanır) */
+export interface LegacyCart {
+  items: Array<{ id: string; quantity: number }>;
+  coupon: string | null;
+  /** `cart` anahtarı var mı ('[]' dahil): sepet boşaltıldıysa satırlar sunucudan da düşer */
+  present: boolean;
+}
+
+const MAX_LINE_QUANTITY = 999;
+
+function readLegacyCart(store: Storage): LegacyCart | null {
+  const stored = store.getItem(CART_STORAGE_KEY);
+  const coupon = store.getItem(CART_COUPON_KEY) || null;
+  if (stored === null && !coupon) return null;
+  let lines: ReturnType<typeof normalizeLines> = [];
+  try {
+    lines = normalizeLines(JSON.parse(stored || '[]'));
+  } catch {
+    lines = [];
+  }
+  // Aynı ürün iki satırda olsa da tek satır olur
+  const quantities = new Map<string, number>();
+  for (const line of lines) {
+    quantities.set(line.id, Math.min(MAX_LINE_QUANTITY, (quantities.get(line.id) ?? 0) + Math.min(MAX_LINE_QUANTITY, line.quantity)));
+  }
+  return { items: [...quantities].map(([id, quantity]) => ({ id, quantity })), coupon, present: stored !== null };
+}
+
+function readSyncedSnapshot(store: Storage): Map<string, number> | null {
+  try {
+    const raw: unknown = JSON.parse(store.getItem(CART_SYNCED_KEY) || 'null');
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const snapshot = new Map<string, number>();
+    for (const [id, quantity] of Object.entries(raw as Record<string, unknown>)) {
+      const value = Math.floor(Number(quantity));
+      if (id && Number.isFinite(value) && value > 0) snapshot.set(id, value);
+    }
+    return snapshot;
+  } catch {
+    return null;
+  }
+}
+
+function writeSyncedSnapshot(store: Storage, items: LegacyCart['items'] | null): void {
+  try {
+    if (items === null) store.removeItem(CART_SYNCED_KEY);
+    else store.setItem(CART_SYNCED_KEY, JSON.stringify(Object.fromEntries(items.map((item) => [item.id, item.quantity]))));
+  } catch {
+    // Kota / gizli gezinme: sonraki sayfada yine gönderilir; `replace` olduğundan adetler katlanmaz
+  }
+}
+
 /**
- * Storefront sepet uçlarının istemcisi. İlk işlemden önce eski localStorage sepetini bir kez sunucuya taşır
+ * localStorage sepetinin sunucuya uygulanacak farkı (#434 düzeltme; storefront checkout'uyla aynı kural):
+ * `set` son eşitlemeden sonra eklenen / adedi değişen satırlar (adet ayarlanır), `remove` çıkarılan ürünler.
+ * `synced` yoksa (ilk eşitleme) bütün satırlar yenidir. `cart` anahtarı yoksa satır silinmez.
+ */
+export function legacyCartDiff(
+  legacy: LegacyCart,
+  synced: Map<string, number> | null,
+): { set: Array<{ id: string; quantity: number }>; remove: string[] } {
+  const base = synced ?? new Map<string, number>();
+  const current = new Set(legacy.items.map((item) => item.id));
+  const set = legacy.items.filter((item) => base.get(item.id) !== item.quantity);
+  const remove = legacy.present ? [...base.keys()].filter((id) => !current.has(id)) : [];
+  return { set, remove };
+}
+
+/**
+ * Storefront sepet uçlarının istemcisi. İlk işlemden önce localStorage sepetini sunucu sepetiyle eşitler
  * (`migrate`); her değişiklikten sonra diğer sekmelere `crafter_cart_sync` sinyali yazar.
  */
 export class ServerCartClient {
@@ -222,13 +291,20 @@ export class ServerCartClient {
   }
 
   /**
-   * Eski temaların localStorage sepeti (`cart`, `crafter_cart_coupon`) sayfa başına bir kez taşınır: sunucu sepeti
-   * boşsa satırlar (yalnızca id + adet), kupon yoksa kupon gönderilir; ardından anahtarlar silinir. Sunucu sepeti
-   * doluysa sunucudaki esas alınır ve anahtarlar yine silinir. Ağ / sunucu hatasında localStorage korunur (sonraki
-   * sayfada tekrar denenir); istek reddedilirse (4xx) kayıt bozuk sayılır ve silinir.
-   * Kupon yalnızca sunucu kabul ederse taşınır (#476): kupon adımı 4xx ile reddedilirse taşınan satırlar korunur,
-   * kupon düşer, iki anahtar da silinir ve dönen sepette `couponRemoved: { code, reason }` bir kez bildirilir.
-   * Dönüş: taşıma sırasında okunan son sepet (yoksa null).
+   * localStorage sepetini (`cart`: v1 temalar, SDK 1.4.0 ve öncesi, headless depo) sunucu sepetiyle eşitler; sayfa
+   * başına bir kez, ilk işlemden önce çalışır. Kural storefront checkout'uyla aynıdır (#434 düzeltme):
+   * - Son eşitlenen hal `crafter_cart_synced` kaydındadır. Ondan sonra eklenen ya da adedi değişen satır sunucuda bu
+   *   adede ayarlanır (`/cart/add.js { items, replace: true }`, toplanmaz); `cart`'tan çıkarılan satır sunucudan da
+   *   düşer (`/cart/change.js { quantity: 0 }`). Değişmeyen satır gönderilmez: sunucuda / başka cihazda yapılan
+   *   değişiklik korunur, sunucuda olup `cart`'ta hiç olmayan satırlar kalır. İlk eşitlemede bütün satırlar yenidir.
+   * - Sunucu sepeti dolu diye `cart` atılmaz (eski kural, eski ödenmemiş sunucu sepetinin yeni seçimin yerine geçmesine
+   *   yol açıyordu). Tekrar çalışması (iki sekme, ağ hatası sonrası) sonucu değiştirmez; adetler katlanmaz.
+   * - `cart` anahtarı kalır (tema sepeti); `cart` hiç yoksa sunucudan satır silinmez ve kayıt temizlenir.
+   * - Ağ / sunucu hatasında kayıt güncellenmez, sonraki sayfada yeniden denenir; 4xx ret (ör. ürün satıştan kalktı)
+   *   bu hali eşitlenmiş sayar.
+   * - Kupon (`crafter_cart_coupon`) sunucu sepetinde kupon yoksa ve sunucu kabul ederse taşınır (#476); 4xx ret
+   *   dönen sepette `couponRemoved: { code, reason }` olarak bir kez bildirilir. Denemeden sonra anahtar silinir.
+   * Dönüş: eşitleme sırasında okunan son sepet (yoksa null).
    */
   public migrate(): Promise<ServerCartResponse | null> {
     if (!this.migration) this.migration = this.runMigration();
@@ -238,56 +314,64 @@ export class ServerCartClient {
   private async runMigration(): Promise<ServerCartResponse | null> {
     const store = storage();
     if (!store) return null;
-    let lines: ReturnType<typeof normalizeLines>;
-    let coupon: string | null;
+    let legacy: LegacyCart | null;
+    let synced: Map<string, number> | null;
     try {
-      const raw = store.getItem(CART_STORAGE_KEY);
-      coupon = store.getItem(CART_COUPON_KEY) || null;
-      if (raw === null && !coupon) return null;
-      try {
-        lines = normalizeLines(JSON.parse(raw || '[]'));
-      } catch {
-        lines = [];
+      legacy = readLegacyCart(store);
+      synced = readSyncedSnapshot(store);
+      if (!legacy) {
+        if (synced) store.removeItem(CART_SYNCED_KEY);
+        return null;
       }
     } catch {
       return null;
     }
-    const forget = () => {
-      try {
-        store.removeItem(CART_STORAGE_KEY);
-        store.removeItem(CART_COUPON_KEY);
-      } catch {
-        // yok sayılır
-      }
-    };
+    const current = legacy;
     const rejected = (error: unknown) => {
       const status = (error as CrafterError)?.statusCode ?? 0;
       return status >= 400 && status < 500;
     };
+    const { set, remove } = legacyCartDiff(current, synced);
     let changed = false;
     try {
       let cart = await this.request('GET', `${this.base}.js`);
-      if (lines.length && cart.items.length === 0) {
-        cart = await this.request('POST', `${this.base}/add.js`, {
-          items: lines.map((line) => ({ id: line.id, quantity: line.quantity })),
-        });
-        changed = true;
-      }
-      if (coupon && !cart.coupon) {
-        try {
-          cart = await this.request('POST', `${this.base}/coupon.js`, { code: coupon });
+      try {
+        if (set.length) {
+          cart = await this.request('POST', `${this.base}/add.js`, { items: set, replace: true });
           changed = true;
-        } catch (error) {
-          // Geçersiz eski kupon taşınmaz; satırlar sunucuda kalır. Ağ / sunucu hatası dış catch'e gider (anahtarlar korunur).
-          if (!rejected(error)) throw error;
-          cart = { ...cart, couponRemoved: { code: coupon, reason: (error as CrafterError).type || 'coupon_invalid' } };
+        }
+        for (const id of remove) {
+          cart = await this.request('POST', `${this.base}/change.js`, { id, quantity: 0 });
+          changed = true;
+        }
+      } catch (error) {
+        // 4xx: satır geçersiz, bu hal eşitlenmiş sayılır; ağ / sunucu hatası dış catch'e gider (kayıt güncellenmez)
+        if (!rejected(error)) throw error;
+        writeSyncedSnapshot(store, current.items);
+        if (changed) this.ping();
+        return null;
+      }
+      writeSyncedSnapshot(store, current.present ? current.items : null);
+      if (current.coupon) {
+        if (!cart.coupon) {
+          try {
+            cart = await this.request('POST', `${this.base}/coupon.js`, { code: current.coupon });
+            changed = true;
+          } catch (error) {
+            // Geçersiz eski kupon taşınmaz. Ağ / sunucu hatası dış catch'e gider (kupon anahtarı korunur).
+            if (!rejected(error)) throw error;
+            cart = { ...cart, couponRemoved: { code: current.coupon, reason: (error as CrafterError).type || 'coupon_invalid' } };
+          }
+        }
+        try {
+          store.removeItem(CART_COUPON_KEY);
+        } catch {
+          // yok sayılır
         }
       }
-      forget();
       if (changed) this.ping();
       return cart;
-    } catch (error) {
-      if (rejected(error)) forget();
+    } catch {
       if (changed) this.ping();
       return null;
     }
