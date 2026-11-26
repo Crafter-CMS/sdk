@@ -93,7 +93,7 @@ Cart and SDK events: `crafter:ready`, `crafter:cart:updated`, `crafter:localizat
 with `event.detail`). v1 themes and external pages load the SDK themselves, as before:
 
 ```html
-<script src="https://unpkg.com/@crafter-cms/sdk@1.5.2/dist/crafter.min.js"></script>
+<script src="https://unpkg.com/@crafter-cms/sdk@1.5.3/dist/crafter.min.js"></script>
 <script>window.crafter = new Crafter();</script>
 ```
 

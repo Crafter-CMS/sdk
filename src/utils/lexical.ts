@@ -192,13 +192,15 @@ export function lexicalToHtml(node: any, options?: LexicalHtmlOptions): string {
       }
     }
 
-    if (node.indent && typeof node.indent === 'number' && node.indent > 0) {
-      styles.push(`padding-left: ${node.indent * 24}px`);
+    const indent = toPositiveInt(node.indent, 20);
+    if (indent) {
+      styles.push(`padding-left: ${indent * 24}px`);
     }
 
     const classAttr = classes.length ? ` class="${classes.join(' ')}"` : '';
     const styleAttr = styles.length ? ` style="${styles.join('; ')}"` : '';
-    const dirAttr = node.direction ? ` dir="${node.direction}"` : '';
+    // Only the two values Lexical emits; anything else is dropped (attribute injection guard)
+    const dirAttr = node.direction === 'ltr' || node.direction === 'rtl' ? ` dir="${node.direction}"` : '';
 
     return { classAttr, styleAttr, dirAttr };
   };
@@ -215,7 +217,8 @@ export function lexicalToHtml(node: any, options?: LexicalHtmlOptions): string {
     }
 
     case 'heading': {
-      const tag = node.tag || 'h2';
+      // The tag is interpolated into markup, so it must come from a fixed allowlist
+      const tag = HEADING_TAGS.includes(node.tag) ? node.tag : 'h2';
       const defaultClasses =
         tag === 'h1'
           ? 'text-3xl font-black mb-6 mt-8 tracking-tight text-gray-900'
@@ -241,7 +244,8 @@ export function lexicalToHtml(node: any, options?: LexicalHtmlOptions): string {
         : 'list-disc list-inside mb-5 space-y-2 text-gray-700';
 
       const { classAttr, styleAttr, dirAttr } = getBlockAttributes(defaultClasses);
-      const startAttr = isNumber && node.start && node.start !== 1 ? ` start="${node.start}"` : '';
+      const start = toPositiveInt(node.start);
+      const startAttr = isNumber && start && start !== 1 ? ` start="${start}"` : '';
       return `<${listTag}${classAttr}${styleAttr}${dirAttr}${startAttr}>${html}</${listTag}>`;
     }
 
@@ -265,26 +269,34 @@ export function lexicalToHtml(node: any, options?: LexicalHtmlOptions): string {
 
     case 'link':
     case 'autolink': {
-      const url = escapeHtml(node.url || '#');
-      const targetAttr = node.target ? ` target="${escapeHtml(node.target)}"` : '';
-      const relAttr = node.rel ? ` rel="${escapeHtml(node.rel)}"` : '';
-      const titleAttr = node.title ? ` title="${escapeHtml(node.title)}"` : '';
+      const url = escapeHtml(sanitizeUrl(node.url, 'link') ?? '#');
+      const target = typeof node.target === 'string' ? node.target.trim().toLowerCase() : '';
+      const safeTarget = LINK_TARGETS.includes(target) ? target : '';
+      const targetAttr = safeTarget ? ` target="${safeTarget}"` : '';
+      const rel = buildRel(node.rel, safeTarget === '_blank');
+      const relAttr = rel ? ` rel="${escapeHtml(rel)}"` : '';
+      const titleAttr = node.title ? ` title="${escapeHtml(String(node.title))}"` : '';
       const classAttr = plain ? '' : ' class="text-primary hover:text-blue-700 hover:underline font-bold transition-colors"';
       return `<a href="${url}"${classAttr}${targetAttr}${relAttr}${titleAttr}>${html}</a>`;
     }
 
     case 'image':
     case 'inline-image': {
-      const src = escapeHtml(node.src || '');
+      const safeSrc = sanitizeUrl(node.src, 'image');
+      // An image with an unsafe or missing source is not rendered at all
+      if (!safeSrc) return '';
+      const src = escapeHtml(safeSrc);
       const alt = escapeHtml(node.altText || '');
       const classAttr = plain ? '' : ' class="rounded-2xl w-full max-h-[500px] object-cover my-8 shadow-sm border border-gray-100"';
-      const widthAttr = node.width && node.width !== 'inherit' ? ` width="${node.width}"` : '';
-      const heightAttr = node.height && node.height !== 'inherit' ? ` height="${node.height}"` : '';
+      const width = toPositiveInt(node.width);
+      const height = toPositiveInt(node.height);
+      const widthAttr = width ? ` width="${width}"` : '';
+      const heightAttr = height ? ` height="${height}"` : '';
       return `<img src="${src}" alt="${alt}"${classAttr}${widthAttr}${heightAttr} />`;
     }
 
     case 'code': {
-      const language = node.language || '';
+      const language = typeof node.language === 'string' && /^[A-Za-z0-9_+#.-]{1,32}$/.test(node.language) ? node.language : '';
       const langClass = language ? ` class="language-${escapeHtml(language)}"` : '';
       const preClass = plain ? '' : ' class="bg-gray-900 text-gray-100 p-5 rounded-2xl overflow-x-auto my-6 text-sm font-mono shadow-lg"';
       return `<pre${preClass}><code${langClass}>${html}</code></pre>`;
@@ -307,10 +319,12 @@ export function lexicalToHtml(node: any, options?: LexicalHtmlOptions): string {
     case 'tablecell': {
       const isHeader = Boolean(node.headerState && node.headerState > 0);
       const cellTag = isHeader ? 'th' : 'td';
-      const colSpan = node.colSpan && node.colSpan > 1 ? ` colspan="${node.colSpan}"` : '';
-      const rowSpan = node.rowSpan && node.rowSpan > 1 ? ` rowspan="${node.rowSpan}"` : '';
-      const bgStyle = node.backgroundColor ? `background-color: ${node.backgroundColor};` : '';
-      const styleAttr = bgStyle ? ` style="${bgStyle}"` : '';
+      const colSpanValue = toPositiveInt(node.colSpan, 1000);
+      const rowSpanValue = toPositiveInt(node.rowSpan, 65534);
+      const colSpan = colSpanValue && colSpanValue > 1 ? ` colspan="${colSpanValue}"` : '';
+      const rowSpan = rowSpanValue && rowSpanValue > 1 ? ` rowspan="${rowSpanValue}"` : '';
+      const bgColor = sanitizeCssColor(node.backgroundColor);
+      const styleAttr = bgColor ? ` style="${escapeHtml(`background-color: ${bgColor};`)}"` : '';
 
       const cellClass = plain
         ? ''
@@ -367,8 +381,9 @@ export function lexicalToHtml(node: any, options?: LexicalHtmlOptions): string {
       }
 
       // Inline styles (e.g. custom color or font size)
-      if (node.style && typeof node.style === 'string') {
-        text = `<span style="${escapeHtml(node.style)}">${text}</span>`;
+      const style = sanitizeInlineStyle(node.style);
+      if (style) {
+        text = `<span style="${escapeHtml(style)}">${text}</span>`;
       }
 
       return text;
@@ -537,6 +552,137 @@ export function toLexical(content: string | Record<string, any>): SerializedEdit
 }
 
 // ===================== Internal Helpers =====================
+
+const HEADING_TAGS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+const LINK_TARGETS = ['_blank', '_self', '_parent', '_top'];
+const LINK_SCHEMES = ['http', 'https', 'mailto', 'tel'];
+const IMAGE_SCHEMES = ['http', 'https'];
+
+/** Decodes numeric (`&#58;`, `&#x3a;`) and common named HTML entities, as a browser would in an attribute. */
+function decodeEntities(str: string): string {
+  const named: Record<string, string> = {
+    colon: ':', tab: '\t', newline: '\n', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", sol: '/', nbsp: '\u00a0',
+  };
+  let out = str;
+  // Repeat to defeat double encoding such as `&amp;#58;`
+  for (let i = 0; i < 3; i++) {
+    const next = out.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);?/gi, (m, ent: string) => {
+      if (ent[0] === '#') {
+        const code = ent[1] === 'x' || ent[1] === 'X' ? parseInt(ent.slice(2), 16) : parseInt(ent.slice(1), 10);
+        return Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
+      }
+      const v = named[ent.toLowerCase()];
+      return v !== undefined ? v : m;
+    });
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+/**
+ * Returns a URL that is safe to place in `href` / `src`, or `null` when it must be dropped.
+ * Allowed: http(s) (plus mailto/tel for links), protocol-relative `//host`, relative paths, `?query` and `#anchors`.
+ * Anything with another scheme (`javascript:`, `data:`, `vbscript:`, `file:` ...) is rejected. The check runs on a
+ * normalized copy: entities decoded, whitespace / control characters removed, lowercased, so `JaVaScRiPt:`,
+ * `\tjavascript:`, `java\nscript:` and `javascript&#58;` are all caught. The original (trimmed) value is returned.
+ */
+function sanitizeUrl(value: unknown, kind: 'link' | 'image' = 'link'): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.replace(/^[\u0000-\u0020\u007f-\u009f\u00a0\u1680\u2000-\u200f\u2028\u2029\u202f\u205f\u3000\ufeff]+|[\u0000-\u0020\u007f-\u009f]+$/g, '');
+  if (!trimmed) return null;
+
+  let normalized = decodeEntities(trimmed);
+  try {
+    // Percent-encoded scheme characters are not decoded by browsers, but decode anyway to be strict
+    normalized = decodeURIComponent(normalized);
+  } catch {
+    // keep as is
+  }
+  // Browsers strip tab/newline anywhere in a URL and ignore leading control/space characters
+  normalized = normalized.replace(/[\u0000-\u0020\u007f-\u009f\u00a0\u1680\u2000-\u200f\u2028\u2029\u202f\u205f\u3000\ufeff]/g, '').toLowerCase();
+  if (!normalized) return null;
+
+  const schemeMatch = normalized.match(/^([a-z][a-z0-9+.-]*):/);
+  if (schemeMatch) {
+    const allowed = kind === 'image' ? IMAGE_SCHEMES : LINK_SCHEMES;
+    return allowed.includes(schemeMatch[1]) ? trimmed : null;
+  }
+  // No scheme: a colon before the first / ? # would make it look like one to a browser after decoding
+  const firstColon = normalized.indexOf(':');
+  if (firstColon !== -1) {
+    const firstDelim = normalized.search(/[/?#\\]/);
+    if (firstDelim === -1 || firstColon < firstDelim) return null;
+  }
+  return trimmed;
+}
+
+/** Parses a non-negative integer (number or numeric string) within `max`; anything else yields 0. */
+function toPositiveInt(value: unknown, max = 100000): number {
+  const n = typeof value === 'number' ? value : typeof value === 'string' && /^\s*\d+\s*$/.test(value) ? Number(value) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(Math.floor(n), max);
+}
+
+/** Merges a user rel with `noopener noreferrer` when the link opens a new browsing context. */
+function buildRel(rel: unknown, newWindow: boolean): string {
+  const tokens = typeof rel === 'string' ? rel.toLowerCase().split(/\s+/).filter((t) => /^[a-z-]+$/.test(t)) : [];
+  if (newWindow) {
+    if (!tokens.includes('noopener')) tokens.push('noopener');
+    if (!tokens.includes('noreferrer')) tokens.push('noreferrer');
+  }
+  return Array.from(new Set(tokens)).join(' ');
+}
+
+/** Accepts only plain CSS colors: hex, rgb()/rgba()/hsl()/hsla() with numeric arguments, or a keyword. */
+function sanitizeCssColor(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  if (/^#[0-9a-f]{3,8}$/i.test(v)) return v;
+  if (/^(rgb|rgba|hsl|hsla)\(\s*[\d.%\s,/+-]+\)$/i.test(v)) return v;
+  if (/^[a-z]{3,30}$/i.test(v)) return v;
+  return null;
+}
+
+const STYLE_PROPERTIES: Record<string, 'color' | 'length' | 'keyword' | 'family'> = {
+  color: 'color',
+  'background-color': 'color',
+  'font-size': 'length',
+  'line-height': 'length',
+  'letter-spacing': 'length',
+  'font-family': 'family',
+  'font-weight': 'keyword',
+  'font-style': 'keyword',
+  'text-decoration': 'keyword',
+  'text-transform': 'keyword',
+  'white-space': 'keyword',
+};
+
+/**
+ * Keeps only a small set of typographic declarations (the ones the Lexical editor writes for text) with strictly
+ * validated values. Drops everything else, including `url()`, `expression()`, `position`, `@import` and escapes.
+ */
+function sanitizeInlineStyle(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  // Reject CSS escapes and comments outright: they can hide any of the checks below
+  if (/[\\<>]|\/\*/.test(value)) return '';
+  const out: string[] = [];
+  for (const decl of value.split(';')) {
+    const idx = decl.indexOf(':');
+    if (idx === -1) continue;
+    const prop = decl.slice(0, idx).trim().toLowerCase();
+    const val = decl.slice(idx + 1).trim();
+    const kind = STYLE_PROPERTIES[prop];
+    if (!kind || !val) continue;
+    let ok = false;
+    if (kind === 'color') ok = sanitizeCssColor(val) !== null;
+    else if (kind === 'length') ok = /^(\d+(\.\d+)?)(px|em|rem|%|pt)?$|^normal$/i.test(val);
+    else if (kind === 'keyword') ok = /^[a-z0-9 -]{1,40}$/i.test(val);
+    else if (kind === 'family') ok = /^[a-z0-9 ,"'_-]{1,100}$/i.test(val);
+    if (ok) out.push(`${prop}: ${val}`);
+  }
+  return out.join('; ');
+}
 
 function escapeHtml(str: string): string {
   return String(str)

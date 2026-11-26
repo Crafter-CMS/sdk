@@ -1936,12 +1936,13 @@ function lexicalToHtml(node, options) {
         plain2 ? styles.push("text-align: left") : classes.push("text-left");
       }
     }
-    if (node.indent && typeof node.indent === "number" && node.indent > 0) {
-      styles.push(`padding-left: ${node.indent * 24}px`);
+    const indent = toPositiveInt(node.indent, 20);
+    if (indent) {
+      styles.push(`padding-left: ${indent * 24}px`);
     }
     const classAttr = classes.length ? ` class="${classes.join(" ")}"` : "";
     const styleAttr = styles.length ? ` style="${styles.join("; ")}"` : "";
-    const dirAttr = node.direction ? ` dir="${node.direction}"` : "";
+    const dirAttr = node.direction === "ltr" || node.direction === "rtl" ? ` dir="${node.direction}"` : "";
     return { classAttr, styleAttr, dirAttr };
   };
   switch (type) {
@@ -1954,7 +1955,7 @@ function lexicalToHtml(node, options) {
       return `<p${classAttr}${styleAttr}${dirAttr}>${html}</p>`;
     }
     case "heading": {
-      const tag = node.tag || "h2";
+      const tag = HEADING_TAGS.includes(node.tag) ? node.tag : "h2";
       const defaultClasses = tag === "h1" ? "text-3xl font-black mb-6 mt-8 tracking-tight text-gray-900" : tag === "h2" ? "text-2xl font-bold mb-4 mt-6 tracking-tight text-gray-900" : tag === "h3" ? "text-xl font-bold mb-3 mt-5 text-gray-900" : "text-lg font-bold mb-3 mt-4 text-gray-900";
       const { classAttr, styleAttr, dirAttr } = getBlockAttributes(defaultClasses);
       return `<${tag}${classAttr}${styleAttr}${dirAttr}>${html}</${tag}>`;
@@ -1965,7 +1966,8 @@ function lexicalToHtml(node, options) {
       const listTag = isNumber ? "ol" : "ul";
       const defaultClasses = isCheckList ? "space-y-2 mb-5 list-none" : isNumber ? "list-decimal list-inside mb-5 space-y-2 text-gray-700" : "list-disc list-inside mb-5 space-y-2 text-gray-700";
       const { classAttr, styleAttr, dirAttr } = getBlockAttributes(defaultClasses);
-      const startAttr = isNumber && node.start && node.start !== 1 ? ` start="${node.start}"` : "";
+      const start = toPositiveInt(node.start);
+      const startAttr = isNumber && start && start !== 1 ? ` start="${start}"` : "";
       return `<${listTag}${classAttr}${styleAttr}${dirAttr}${startAttr}>${html}</${listTag}>`;
     }
     case "listitem": {
@@ -1985,24 +1987,31 @@ function lexicalToHtml(node, options) {
     }
     case "link":
     case "autolink": {
-      const url = escapeHtml(node.url || "#");
-      const targetAttr = node.target ? ` target="${escapeHtml(node.target)}"` : "";
-      const relAttr = node.rel ? ` rel="${escapeHtml(node.rel)}"` : "";
-      const titleAttr = node.title ? ` title="${escapeHtml(node.title)}"` : "";
+      const url = escapeHtml(sanitizeUrl(node.url, "link") ?? "#");
+      const target = typeof node.target === "string" ? node.target.trim().toLowerCase() : "";
+      const safeTarget = LINK_TARGETS.includes(target) ? target : "";
+      const targetAttr = safeTarget ? ` target="${safeTarget}"` : "";
+      const rel = buildRel(node.rel, safeTarget === "_blank");
+      const relAttr = rel ? ` rel="${escapeHtml(rel)}"` : "";
+      const titleAttr = node.title ? ` title="${escapeHtml(String(node.title))}"` : "";
       const classAttr = plain2 ? "" : ' class="text-primary hover:text-blue-700 hover:underline font-bold transition-colors"';
       return `<a href="${url}"${classAttr}${targetAttr}${relAttr}${titleAttr}>${html}</a>`;
     }
     case "image":
     case "inline-image": {
-      const src = escapeHtml(node.src || "");
+      const safeSrc = sanitizeUrl(node.src, "image");
+      if (!safeSrc) return "";
+      const src = escapeHtml(safeSrc);
       const alt = escapeHtml(node.altText || "");
       const classAttr = plain2 ? "" : ' class="rounded-2xl w-full max-h-[500px] object-cover my-8 shadow-sm border border-gray-100"';
-      const widthAttr = node.width && node.width !== "inherit" ? ` width="${node.width}"` : "";
-      const heightAttr = node.height && node.height !== "inherit" ? ` height="${node.height}"` : "";
+      const width = toPositiveInt(node.width);
+      const height = toPositiveInt(node.height);
+      const widthAttr = width ? ` width="${width}"` : "";
+      const heightAttr = height ? ` height="${height}"` : "";
       return `<img src="${src}" alt="${alt}"${classAttr}${widthAttr}${heightAttr} />`;
     }
     case "code": {
-      const language = node.language || "";
+      const language = typeof node.language === "string" && /^[A-Za-z0-9_+#.-]{1,32}$/.test(node.language) ? node.language : "";
       const langClass = language ? ` class="language-${escapeHtml(language)}"` : "";
       const preClass = plain2 ? "" : ' class="bg-gray-900 text-gray-100 p-5 rounded-2xl overflow-x-auto my-6 text-sm font-mono shadow-lg"';
       return `<pre${preClass}><code${langClass}>${html}</code></pre>`;
@@ -2021,10 +2030,12 @@ function lexicalToHtml(node, options) {
     case "tablecell": {
       const isHeader = Boolean(node.headerState && node.headerState > 0);
       const cellTag = isHeader ? "th" : "td";
-      const colSpan = node.colSpan && node.colSpan > 1 ? ` colspan="${node.colSpan}"` : "";
-      const rowSpan = node.rowSpan && node.rowSpan > 1 ? ` rowspan="${node.rowSpan}"` : "";
-      const bgStyle = node.backgroundColor ? `background-color: ${node.backgroundColor};` : "";
-      const styleAttr = bgStyle ? ` style="${bgStyle}"` : "";
+      const colSpanValue = toPositiveInt(node.colSpan, 1e3);
+      const rowSpanValue = toPositiveInt(node.rowSpan, 65534);
+      const colSpan = colSpanValue && colSpanValue > 1 ? ` colspan="${colSpanValue}"` : "";
+      const rowSpan = rowSpanValue && rowSpanValue > 1 ? ` rowspan="${rowSpanValue}"` : "";
+      const bgColor = sanitizeCssColor(node.backgroundColor);
+      const styleAttr = bgColor ? ` style="${escapeHtml(`background-color: ${bgColor};`)}"` : "";
       const cellClass = plain2 ? "" : isHeader ? ' class="px-4 py-3 text-left font-bold text-gray-900 bg-gray-100 border border-gray-200"' : ' class="px-4 py-3 text-gray-700 border border-gray-200"';
       return `<${cellTag}${cellClass}${colSpan}${rowSpan}${styleAttr}>${html}</${cellTag}>`;
     }
@@ -2064,8 +2075,9 @@ function lexicalToHtml(node, options) {
       if (format & IS_HIGHLIGHT) {
         text = `<mark class="bg-yellow-200 px-1 rounded">${text}</mark>`;
       }
-      if (node.style && typeof node.style === "string") {
-        text = `<span style="${escapeHtml(node.style)}">${text}</span>`;
+      const style = sanitizeInlineStyle(node.style);
+      if (style) {
+        text = `<span style="${escapeHtml(style)}">${text}</span>`;
       }
       return text;
     }
@@ -2182,6 +2194,115 @@ function toLexical(content) {
       }))
     }
   };
+}
+var HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"];
+var LINK_TARGETS = ["_blank", "_self", "_parent", "_top"];
+var LINK_SCHEMES = ["http", "https", "mailto", "tel"];
+var IMAGE_SCHEMES = ["http", "https"];
+function decodeEntities(str) {
+  const named = {
+    colon: ":",
+    tab: "	",
+    newline: "\n",
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+    sol: "/",
+    nbsp: "\xA0"
+  };
+  let out = str;
+  for (let i = 0; i < 3; i++) {
+    const next = out.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);?/gi, (m, ent) => {
+      if (ent[0] === "#") {
+        const code2 = ent[1] === "x" || ent[1] === "X" ? parseInt(ent.slice(2), 16) : parseInt(ent.slice(1), 10);
+        return Number.isFinite(code2) && code2 >= 0 && code2 <= 1114111 ? String.fromCodePoint(code2) : "";
+      }
+      const v = named[ent.toLowerCase()];
+      return v !== void 0 ? v : m;
+    });
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+function sanitizeUrl(value, kind = "link") {
+  if (typeof value !== "string") return null;
+  const trimmed = value.replace(/^[\u0000-\u0020\u007f-\u009f\u00a0\u1680\u2000-\u200f\u2028\u2029\u202f\u205f\u3000\ufeff]+|[\u0000-\u0020\u007f-\u009f]+$/g, "");
+  if (!trimmed) return null;
+  let normalized = decodeEntities(trimmed);
+  try {
+    normalized = decodeURIComponent(normalized);
+  } catch {
+  }
+  normalized = normalized.replace(/[\u0000-\u0020\u007f-\u009f\u00a0\u1680\u2000-\u200f\u2028\u2029\u202f\u205f\u3000\ufeff]/g, "").toLowerCase();
+  if (!normalized) return null;
+  const schemeMatch = normalized.match(/^([a-z][a-z0-9+.-]*):/);
+  if (schemeMatch) {
+    const allowed = kind === "image" ? IMAGE_SCHEMES : LINK_SCHEMES;
+    return allowed.includes(schemeMatch[1]) ? trimmed : null;
+  }
+  const firstColon = normalized.indexOf(":");
+  if (firstColon !== -1) {
+    const firstDelim = normalized.search(/[/?#\\]/);
+    if (firstDelim === -1 || firstColon < firstDelim) return null;
+  }
+  return trimmed;
+}
+function toPositiveInt(value, max = 1e5) {
+  const n = typeof value === "number" ? value : typeof value === "string" && /^\s*\d+\s*$/.test(value) ? Number(value) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(Math.floor(n), max);
+}
+function buildRel(rel, newWindow) {
+  const tokens = typeof rel === "string" ? rel.toLowerCase().split(/\s+/).filter((t) => /^[a-z-]+$/.test(t)) : [];
+  if (newWindow) {
+    if (!tokens.includes("noopener")) tokens.push("noopener");
+    if (!tokens.includes("noreferrer")) tokens.push("noreferrer");
+  }
+  return Array.from(new Set(tokens)).join(" ");
+}
+function sanitizeCssColor(value) {
+  if (typeof value !== "string") return null;
+  const v = value.trim();
+  if (/^#[0-9a-f]{3,8}$/i.test(v)) return v;
+  if (/^(rgb|rgba|hsl|hsla)\(\s*[\d.%\s,/+-]+\)$/i.test(v)) return v;
+  if (/^[a-z]{3,30}$/i.test(v)) return v;
+  return null;
+}
+var STYLE_PROPERTIES = {
+  color: "color",
+  "background-color": "color",
+  "font-size": "length",
+  "line-height": "length",
+  "letter-spacing": "length",
+  "font-family": "family",
+  "font-weight": "keyword",
+  "font-style": "keyword",
+  "text-decoration": "keyword",
+  "text-transform": "keyword",
+  "white-space": "keyword"
+};
+function sanitizeInlineStyle(value) {
+  if (typeof value !== "string" || !value.trim()) return "";
+  if (/[\\<>]|\/\*/.test(value)) return "";
+  const out = [];
+  for (const decl of value.split(";")) {
+    const idx = decl.indexOf(":");
+    if (idx === -1) continue;
+    const prop = decl.slice(0, idx).trim().toLowerCase();
+    const val = decl.slice(idx + 1).trim();
+    const kind = STYLE_PROPERTIES[prop];
+    if (!kind || !val) continue;
+    let ok = false;
+    if (kind === "color") ok = sanitizeCssColor(val) !== null;
+    else if (kind === "length") ok = /^(\d+(\.\d+)?)(px|em|rem|%|pt)?$|^normal$/i.test(val);
+    else if (kind === "keyword") ok = /^[a-z0-9 -]{1,40}$/i.test(val);
+    else if (kind === "family") ok = /^[a-z0-9 ,"'_-]{1,100}$/i.test(val);
+    if (ok) out.push(`${prop}: ${val}`);
+  }
+  return out.join("; ");
 }
 function escapeHtml(str) {
   return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
@@ -3355,7 +3476,7 @@ function swapSection(id, html) {
 }
 
 // src/version.ts
-var SDK_VERSION = "1.5.2";
+var SDK_VERSION = "1.5.3";
 
 // src/index.ts
 var DIRECT_API_BASE = "https://api.crafter.net.tr";

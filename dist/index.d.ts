@@ -2843,7 +2843,7 @@ declare function isCouponError(err: unknown): err is CrafterCouponError;
 declare function isPaymentProviderError(err: unknown): err is CrafterPaymentProviderError;
 
 /** Package version; kept in sync with package.json (checked by a test) */
-declare const SDK_VERSION = "1.5.2";
+declare const SDK_VERSION = "1.5.3";
 
 /** `crafter.checkout()` options */
 interface CheckoutNavigateOptions {
@@ -2855,8 +2855,8 @@ interface CheckoutNavigateOptions {
     navigate?: boolean;
 }
 declare class Crafter {
-    static readonly version = "1.5.2";
-    readonly version = "1.5.2";
+    static readonly version = "1.5.3";
+    readonly version = "1.5.3";
     readonly config: CrafterConfig;
     readonly http: HttpClient;
     readonly events: EventEmitter;
