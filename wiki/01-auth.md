@@ -1,16 +1,16 @@
-# 🔐 Kimlik Doğrulama Modülü (`crafter.auth`)
+# 🔐 Authentication Module (`crafter.auth`)
 
-Kullanıcı girişi, kayıt olma, 2 aşamalı doğrulama (2FA), tek kullanımlık e-posta kodları, oyun içi hızlı giriş ve şifre sıfırlama işlemlerini yönetir.
+Handles user sign-in, sign-up, two-factor authentication (2FA), one-time email codes, in-game quick login and password resets.
 
 ---
 
-## 📌 Metotlar ve Kullanım Örnekleri
+## 📌 Methods and Usage Examples
 
 ### 1. `signin(data)` / `login(data)`
-Kullanıcı adı ve şifre ile oturum açar.
+Signs in with a username and password.
 
-* **HTTP Rota:** `POST /v2/auth/signin`
-* **Girdi:**
+* **HTTP Route:** `POST /v2/auth/signin`
+* **Input:**
   ```typescript
   interface SignInDto {
     username: string;
@@ -18,47 +18,47 @@ Kullanıcı adı ve şifre ile oturum açar.
     turnstileToken?: string;
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   const res = await crafter.auth.signin({
-    username: 'oyuncu_adi',
+    username: 'player_name',
     password: 'GucluSifre123!',
-    turnstileToken: turnstile.getResponse() // Opsiyonel
+    turnstileToken: turnstile.getResponse() // Optional
   });
 
   if (res.requires2FA) {
-    // Kullanıcı 2FA ekranına yönlendirilir
-    console.log('2FA Gerekli, yöntemler:', res.methods, 'Temp Token:', res.tempToken);
+    // The user is sent to the 2FA screen
+    console.log('2FA required, methods:', res.methods, 'Temp token:', res.tempToken);
   } else if (res.requiresEmailVerification) {
-    // E-posta doğrulama ekranı açılır
-    console.log('E-posta onayı gerekli:', res.maskedEmail);
+    // The email verification screen opens
+    console.log('Email verification required:', res.maskedEmail);
   } else {
-    // Oturum başarıyla açıldı, token otomatik kaydedildi!
-    console.log('Hoş geldiniz!');
+    // Signed in successfully, the token was saved automatically!
+    console.log('Welcome!');
   }
   ```
 
 ---
 
 ### 2. `signup(data)` / `register(data)`
-Yeni bir kullanıcı hesabı oluşturur.
+Creates a new user account.
 
-* **HTTP Rota:** `POST /v2/auth/signup`
-* **Girdi:**
+* **HTTP Route:** `POST /v2/auth/signup`
+* **Input:**
   ```typescript
   interface SignUpDto {
     username: string;
     email: string;
     password: string;
-    confirm_password: string; // veya camelCase confirmPassword (SDK otomatik dönüştürür)
+    confirm_password: string; // or camelCase confirmPassword (the SDK converts it automatically)
     turnstileToken?: string;
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   const res = await crafter.auth.signup({
-    username: 'oyuncu_adi',
-    email: 'oyuncu@example.com',
+    username: 'player_name',
+    email: 'player@example.com',
     password: 'GucluSifre123!',
     confirm_password: 'GucluSifre123!'
   });
@@ -66,79 +66,79 @@ Yeni bir kullanıcı hesabı oluşturur.
 
 ---
 
-### 3. `inGameAuth(data?)` (Oyun İçi Hızlı Giriş)
-Minecraft sunucusunda `/web` veya `/site` komutu ile siteye tıklayan oyuncunun şifresiz, tek kullanımlık güvenlik hash'i ile anında oturum açmasını sağlar.
+### 3. `inGameAuth(data?)` (In-Game Quick Login)
+Instantly signs in a player who clicked through to the site with the `/web` or `/site` command on the Minecraft server, using a passwordless, single-use security hash.
 
-* **HTTP Rota:** `POST /v2/auth/ingame`
-* **Akıllı URL Çözümlemesi:** Eğer tarayıcıda sayfa `?username=...&uuid=...&server_id=...&hash=...` parametreleriyle açılmışsa, fonksiyona hiçbir parametre vermeden tek satırda çağırabilirsiniz:
+* **HTTP Route:** `POST /v2/auth/ingame`
+* **Smart URL parsing:** If the page was opened in the browser with the `?username=...&uuid=...&server_id=...&hash=...` parameters, you can call it in one line without any arguments:
   ```javascript
-  // Sayfa: https://sunucu.com/auth/ingame?username=Steve&uuid=...&server_id=...&hash=...
+  // Page: https://example.com/auth/ingame?username=Steve&uuid=...&server_id=...&hash=...
   await crafter.auth.inGameAuth();
-  // ✅ Oyuncu anında giriş yaptı, ana sayfaya yönlendirilebilir!
+  // ✅ The player is signed in instantly and can be redirected to the home page!
   window.location.href = '/';
   ```
-* **Manuel Kullanım:**
+* **Manual usage:**
   ```javascript
   await crafter.auth.inGameAuth({
     username: 'Steve',
     uuid: '12345678-1234-1234-1234-123456789abc',
     server_id: 'survival-1',
-    hash: 'güvenlik-hash-kodu'
+    hash: 'security-hash-code'
   });
   ```
 
 ---
 
 ### 4. `resetPassword(data)` & `getResetTokenFromUrl()`
-Şifre sıfırlama bağlantısındaki token ile yeni şifreyi belirler.
+Sets the new password with the token from the password reset link.
 
-* **HTTP Rota:** `POST /v2/auth/reset-password`
-* **Otomatik URL Token Çözümlemesi:** URL'deki `?token=...` parametresini otomatik algılar:
+* **HTTP Route:** `POST /v2/auth/reset-password`
+* **Automatic URL token parsing:** Detects the `?token=...` parameter in the URL automatically:
   ```javascript
-  // Sayfa: /auth/password/reset?token=xyz123abc
+  // Page: /auth/password/reset?token=xyz123abc
   await crafter.auth.resetPassword({
     new_password: 'YeniGucluSifre123!',
     confirm_password: 'YeniGucluSifre123!'
   });
   ```
-* **Manuel Kullanım:**
+* **Manual usage:**
   ```javascript
   await crafter.auth.resetPassword({
-    token: 'ozel-token',
+    token: 'custom-token',
     new_password: 'YeniGucluSifre123!',
     confirm_password: 'YeniGucluSifre123!'
   });
   ```
-* **URL Kontrol Yardımcısı:**
+* **URL check helper:**
   ```javascript
   const token = crafter.auth.getResetTokenFromUrl();
   if (!token) {
-    alert('Geçersiz şifre sıfırlama linki!');
+    alert('Invalid password reset link!');
   }
   ```
 
 ---
 
 ### 5. `forgotPassword(email, turnstileToken?)`
-Şifre sıfırlama e-postası talep eder.
+Requests a password reset email.
 
-* **HTTP Rota:** `POST /v2/auth/forgot-password`
-* **Örnek Kullanım:**
+* **HTTP Route:** `POST /v2/auth/forgot-password`
+* **Example usage:**
   ```javascript
-  await crafter.auth.forgotPassword('oyuncu@example.com');
-  alert('Şifre sıfırlama bağlantısı e-posta adresinize gönderildi.');
+  await crafter.auth.forgotPassword('player@example.com');
+  alert('A password reset link was sent to your email address.');
   ```
 
 ---
 
 ### 6. `validate2Fa(data)` / `verify2Fa(data)`
-Giriş sırasında 2FA kodu doğrulama.
+Verifies the 2FA code during sign-in.
 
-* **HTTP Rota:** `POST /v2/auth/2fa/verify`
-* **Örnek Kullanım:**
+* **HTTP Route:** `POST /v2/auth/2fa/verify`
+* **Example usage:**
   ```javascript
   const res = await crafter.auth.validate2Fa({
-    tempToken: 'signin-asamasindan-gelen-tempToken',
+    tempToken: 'tempToken-from-the-signin-step',
     code: '123456',
     method: 'authenticator' // 'authenticator' | 'email' | 'discord' | 'recovery_code'
   });
@@ -147,17 +147,17 @@ Giriş sırasında 2FA kodu doğrulama.
 ---
 
 ### 7. `send2FaEmailCode(tempToken)` & `send2FaDiscordCode(tempToken)`
-Giriş aşamasında 2FA e-posta veya Discord doğrulama kodunu tekrar gönderme.
+Resends the 2FA email or Discord verification code during sign-in.
 
-* **HTTP Rota:** `POST /v2/auth/2fa/send-email-code` & `POST /v2/auth/2fa/send-discord-code`
+* **HTTP Route:** `POST /v2/auth/2fa/send-email-code` & `POST /v2/auth/2fa/send-discord-code`
 
 ---
 
 ### 8. `verifyEmail(data)` & `resendEmail(tempToken)`
-Giriş veya kayıt sırasında e-posta doğrulama OTP kodunu onaylama ve yeniden talep etme.
+Confirms and re-requests the email verification OTP code during sign-in or sign-up.
 
-* **HTTP Rota:** `POST /v2/auth/verify-email` & `POST /v2/auth/resend-email`
-* **Örnek:**
+* **HTTP Route:** `POST /v2/auth/verify-email` & `POST /v2/auth/resend-email`
+* **Example:**
   ```javascript
   await crafter.auth.verifyEmail({ tempToken: '...', code: '654321' });
   ```
@@ -165,15 +165,15 @@ Giriş veya kayıt sırasında e-posta doğrulama OTP kodunu onaylama ve yeniden
 ---
 
 ### 9. `getDiscordAuthUrl(action, redirectUri?)`
-Discord ile giriş veya hesaba Discord bağlama OAuth yönlendirme linkini üretir.
+Builds the OAuth redirect link for signing in with Discord or linking Discord to an account.
 
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
-  // Giriş butonu için:
+  // For a sign-in button:
   document.querySelector('#btn-discord-login').href = 
     crafter.auth.getDiscordAuthUrl('login', window.location.origin + '/auth/callback');
 
-  // Profilde hesap bağlama butonu için:
+  // For an account-link button on the profile:
   document.querySelector('#btn-discord-connect').href = 
     crafter.auth.getDiscordAuthUrl('connect', window.location.href);
   ```
@@ -181,7 +181,7 @@ Discord ile giriş veya hesaba Discord bağlama OAuth yönlendirme linkini üret
 ---
 
 ### 10. `logout()`
-Kullanıcı oturumunu kapatır. Storefront proxy modunda HttpOnly `crafter_token` ve `crafter_refresh_token` çerezlerini siler, tarayıcı hafızasını temizler ve `auth:logout` olayını tetikler:
+Signs the user out. In storefront proxy mode it deletes the HttpOnly `crafter_token` and `crafter_refresh_token` cookies, clears browser storage and fires the `auth:logout` event:
 
 ```javascript
 await crafter.auth.logout();

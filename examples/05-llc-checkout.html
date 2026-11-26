@@ -1,15 +1,15 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LLC Checkout (Stripe Payment Element)</title>
   <!--
-    Satıcı Crafter Technologies LLC iken CrafterPayments sepet ödemesi (SDK v1.2.0).
-    - SDK Stripe.js'i içermez; bu sayfa Stripe.js'i yalnızca LLC yanıtı gelince js.stripe.com'dan yükler.
-    - Test için Stripe test modu (pk_test_...) ve test kartı: 4242 4242 4242 4242, ileri bir tarih, herhangi bir CVC.
-      3DS denemesi: 4000 0027 6000 3184. Gerçek kart kullanmayın.
-    - Storefront modunda çalışır (Liquid tema, /api/storefront proxy'si). Oturum açık olmalıdır.
+    CrafterPayments cart payment when the seller is Crafter Technologies LLC (SDK v1.2.0).
+    - The SDK does not include Stripe.js; this page loads Stripe.js from js.stripe.com only when an LLC response arrives.
+    - For testing use Stripe test mode (pk_test_...) and the test card: 4242 4242 4242 4242, any future date, any CVC.
+      3DS test: 4000 0027 6000 3184. Do not use a real card.
+    - Works in storefront mode (Liquid theme, the /api/storefront proxy). The user must be logged in.
   -->
   <script src="../dist/crafter.min.js"></script>
   <style>
@@ -26,14 +26,14 @@
   </style>
 </head>
 <body>
-  <h1>Ödeme</h1>
+  <h1>Checkout</h1>
 
   <form id="buyer-form" class="card">
-    <label for="name">Ad soyad</label>
+    <label for="name">Full name</label>
     <input id="name" required value="Test Buyer" />
-    <label for="email">E-posta</label>
+    <label for="email">Email</label>
     <input id="email" type="email" required value="buyer@example.com" />
-    <label for="country">Ülke</label>
+    <label for="country">Country</label>
     <select id="country">
       <option value="US">United States</option>
       <option value="DE">Germany</option>
@@ -41,44 +41,44 @@
       <option value="TR">Türkiye</option>
     </select>
     <div id="postal-wrap">
-      <label for="postal">Posta kodu (ABD / Kanada)</label>
+      <label for="postal">Postal code (US / Canada)</label>
       <input id="postal" value="10001" />
     </div>
-    <button id="start" type="submit">Ödemeye geç</button>
+    <button id="start" type="submit">Continue to payment</button>
     <div id="form-error" class="error"></div>
   </form>
 
   <section id="pay" class="card hidden">
     <div id="summary"></div>
     <div id="payment-element" style="margin-top:16px"></div>
-    <button id="pay-button" type="button">Öde</button>
+    <button id="pay-button" type="button">Pay</button>
     <div id="pay-error" class="error"></div>
   </section>
 
   <section id="result" class="card hidden" role="status" aria-live="polite"></section>
 
   <script>
-    // --- Yapılandırma (örnek değerler) ---
+    // --- Configuration (sample values) ---
     const WEBSITE_ID = 'your-website-id';
     const CART = [{ productId: 'demo-product-id', quantity: 1 }];
 
     const crafter = new Crafter({
-      // Backend publishable key döndürmüyorsa buradan verilir (gizli değildir)
+      // Given here if the backend does not return a publishable key (it is not secret)
       stripePublishableKey: 'pk_test_REPLACE_ME',
     });
 
     const $ = (id) => document.getElementById(id);
     const fmt = (n, c) => Crafter.utils.formatMoney(n, c);
     const RESULT_TEXT = {
-      success: 'Ödeme alındı, siparişin teslim edildi.',
-      processing: 'Ödeme alındı, teslimat sürüyor.',
-      pending: 'Ödeme onayı birkaç dakika sürebilir. Siparişlerim sayfasından takip edebilirsin.',
-      refunded: 'Ürün tükendiği için teslim edilemedi; ödemen iade edildi.',
-      needs_review: 'Ödeme alındı ancak teslimat incelemede. Destek ekibimiz seninle iletişime geçecek.',
-      failed: 'Ödeme alınamadı.',
+      success: 'Payment received, your order was delivered.',
+      processing: 'Payment received, delivery in progress.',
+      pending: 'Payment confirmation may take a few minutes. You can track it on the My Orders page.',
+      refunded: 'Could not be delivered because the product sold out; your payment was refunded.',
+      needs_review: 'Payment received but delivery is under review. Our support team will contact you.',
+      failed: 'Payment could not be collected.',
     };
 
-    // Stripe.js yalnızca LLC yanıtında, bir kez yüklenir
+    // Stripe.js is loaded only on an LLC response, once
     let stripeJs;
     function loadStripeJs() {
       if (!stripeJs) {
@@ -88,7 +88,7 @@
               const s = document.createElement('script');
               s.src = 'https://js.stripe.com/v3/';
               s.onload = () => resolve(window.Stripe);
-              s.onerror = () => reject(new Error('Stripe.js yüklenemedi'));
+              s.onerror = () => reject(new Error('Could not load Stripe.js'));
               document.head.appendChild(s);
             });
       }
@@ -99,15 +99,15 @@
       const tax = session.tax;
       const rows = [];
       if (tax) {
-        rows.push(`<div class="row"><span>Ara toplam</span><span>${fmt(tax.subtotal, session.currency)}</span></div>`);
+        rows.push(`<div class="row"><span>Subtotal</span><span>${fmt(tax.subtotal, session.currency)}</span></div>`);
         for (const line of tax.lines) {
           const region = [line.country, line.state].filter(Boolean).join('-');
-          rows.push(`<div class="row"><span>${(line.taxType || 'tax').toUpperCase()} ${region} (%${line.rate})</span><span>${fmt(line.amount, session.currency)}</span></div>`);
+          rows.push(`<div class="row"><span>${(line.taxType || 'tax').toUpperCase()} ${region} (${line.rate}%)</span><span>${fmt(line.amount, session.currency)}</span></div>`);
         }
       }
-      rows.push(`<div class="row total"><span>Toplam</span><span>${fmt(session.amount, session.currency)}</span></div>`);
-      const p = session.presentment; // müşteri para biriminde ödemede mağaza tutarı
-      if (p) rows.push(`<div class="row"><span>Mağaza tutarı</span><span>${fmt(p.storeAmount, p.storeCurrency)}</span></div>`);
+      rows.push(`<div class="row total"><span>Total</span><span>${fmt(session.amount, session.currency)}</span></div>`);
+      const p = session.presentment; // store amount when paying in the customer currency
+      if (p) rows.push(`<div class="row"><span>Store amount</span><span>${fmt(p.storeAmount, p.storeCurrency)}</span></div>`);
       $('summary').innerHTML = rows.join('');
     }
 
@@ -118,7 +118,7 @@
     }
 
     async function mountPaymentElement(session) {
-      if (!session.publishableKey) throw new Error('Stripe publishable key tanımlı değil');
+      if (!session.publishableKey) throw new Error('Stripe publishable key is not configured');
       const Stripe = await loadStripeJs();
       const stripe = Stripe(session.publishableKey);
       const elements = stripe.elements({ clientSecret: session.clientSecret, appearance: { theme: 'night' } });
@@ -136,11 +136,11 @@
             confirmParams: { return_url: returnUrl.toString() },
           });
           if (error) {
-            // Eksik alanları Payment Element kendi gösterir; kart reddi vb. burada. Aynı formla tekrar denenebilir.
+            // The Payment Element shows missing fields itself; card declines etc. land here. The same form can be retried.
             if (error.type !== 'validation_error') $('pay-error').textContent = error.message;
             return;
           }
-          $('pay-button').textContent = 'Doğrulanıyor…';
+          $('pay-button').textContent = 'Verifying…';
           const result = await crafter.payments.waitForResult(session.paymentId);
           showResult(result.outcome);
         } finally {
@@ -149,7 +149,7 @@
       };
     }
 
-    // 3DS tam sayfa yönlendirmesinden dönüş
+    // Return from the full-page 3DS redirect
     const returnedId = new URLSearchParams(location.search).get('stripe_payment_id');
     if (returnedId) {
       $('buyer-form').classList.add('hidden');
@@ -167,7 +167,7 @@
       try {
         const providers = await crafter.payments.getPublicProviders();
         const provider = providers.find((p) => String(p.provider).toLowerCase() === 'crafterpayments');
-        if (!provider) throw new Error('CrafterPayments bu mağazada aktif değil');
+        if (!provider) throw new Error('CrafterPayments is not enabled for this store');
 
         const country = $('country');
         const res = await crafter.cart.checkout(
@@ -180,12 +180,12 @@
             billingCountry: country.value,
             ...(['US', 'CA'].includes(country.value) ? { billingPostalCode: $('postal').value.trim() } : {}),
           },
-          // Müşteri para biriminde ödeme: kilitli teklif alınır; kapalıysa mağaza para biriminde ödenir
+          // Payment in the customer currency: a locked quote is fetched; if disabled, pays in the store currency
           { legalTerms: { version: 'example-terms-v1' }, useCustomerCurrency: true }
         );
 
-        if (res.delivered) return showResult('success'); // bakiyeyle ödendi
-        if (!res.stripe) throw new Error('Beklenmeyen yanıt: bu örnek yalnızca satıcı LLC akışını gösterir');
+        if (res.delivered) return showResult('success'); // paid with balance
+        if (!res.stripe) throw new Error('Unexpected response: this example only shows the seller LLC flow');
 
         renderSummary(res.stripe);
         $('buyer-form').classList.add('hidden');
@@ -194,11 +194,11 @@
       } catch (err) {
         const { isOutOfStockError, isPaymentProviderError } = window.CrafterSDK;
         if (isOutOfStockError(err)) {
-          $('form-error').textContent = `Tükenen ürünler: ${err.productIds.join(', ')}`;
+          $('form-error').textContent = `Sold-out products: ${err.productIds.join(', ')}`;
         } else if (isPaymentProviderError(err)) {
-          $('form-error').textContent = err.message + (err.retryable ? ' (birazdan tekrar deneyin)' : '');
+          $('form-error').textContent = err.message + (err.retryable ? ' (try again shortly)' : '');
         } else {
-          $('form-error').textContent = err.message || 'Ödeme başlatılamadı';
+          $('form-error').textContent = err.message || 'Could not start the payment';
         }
       } finally {
         $('start').disabled = false;

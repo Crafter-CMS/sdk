@@ -3,9 +3,9 @@ import { EventEmitter } from '../core/events';
 import { CrafterConfig, CurrencyConversion, CustomerCurrencyContext } from '../types';
 
 /**
- * Müşteri para birimi (#424, #426): fiyat gösterimi için bağlam ve çeviri. Para birimini sunucu belirler
- * (vitrinin `crafter_currency` çerezi, ülke, mağaza para birimi); SDK kendi çerezini yazmaz.
- * Çevrilen tutarlar yalnızca gösterim içindir; ödeme tutarı kilitli teklifle (`payments.quote`) belirlenir.
+ * Customer currency (#424, #426): context and conversion for price display. The server decides the currency
+ * (the storefront's `crafter_currency` cookie, country, store currency); the SDK does not write its own cookie.
+ * Converted amounts are for display only; the payment amount is set by the locked quote (`payments.quote`).
  */
 export class CurrenciesModule {
   constructor(
@@ -15,8 +15,8 @@ export class CurrenciesModule {
   ) {}
 
   /**
-   * Mağaza para birimi, izinli para birimleri, müşterinin para birimi ve kurlar.
-   * `currency`: müşterinin seçimi (öneri); izinli değilse ülke / mağaza para birimi döner.
+   * Store currency, allowed currencies, the customer's currency and rates.
+   * `currency`: the customer's choice (a suggestion); if not allowed, the country / store currency is returned.
    * GET /payment/currencies?websiteId=&currency=
    */
   public async context(params: { currency?: string; websiteId?: string } = {}): Promise<CustomerCurrencyContext> {
@@ -26,7 +26,7 @@ export class CurrenciesModule {
   }
 
   /**
-   * Mağaza para birimindeki tutarları (en fazla 500) müşteri para birimine çevirir; sıra korunur.
+   * Converts store-currency amounts (at most 500) to the customer currency; order is preserved.
    * POST /payment/currencies/convert
    */
   public async convert(

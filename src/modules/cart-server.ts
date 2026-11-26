@@ -2,18 +2,18 @@ import { CrafterError } from '../core/errors';
 import { CART_COUPON_KEY, CART_STORAGE_KEY, CART_SYNCED_KEY, normalizeLines } from './cart-store';
 
 /**
- * Hibrit sepet (#434): storefront'un sepet uçları. Ziyaretçide sepet storefront'un imzalı çerezinde, giriş yapmış
- * müşteride sunucuda tutulur; SDK iki modu ayırt etmez. Uçlar aynı kökenli ve çerezlidir (`credentials: 'same-origin'`).
- * Fiyat gönderilmez: sunucu güncel üründen hesaplar.
+ * Hybrid cart (#434): the storefront's cart endpoints. For a visitor the cart is kept in the storefront's signed cookie, for a
+ * logged-in customer on the server; the SDK does not tell the two modes apart. The endpoints are same-origin with cookies (`credentials: 'same-origin'`).
+ * No price is sent: the server calculates it from the current product.
  *   GET  /cart.js
  *   POST /cart/add.js     { id, quantity, options? } | { items: [{ id, quantity }], replace? }
- *                         (`replace: true`: adet verilen değere ayarlanır, toplanmaz; localStorage eşitlemesi kullanır)
- *   POST /cart/change.js  { id, quantity }   (0 siler; id ürün id'si ya da satır anahtarı)
+ *                         (`replace: true`: the quantity is set to the given value, not added; used by the localStorage sync)
+ *   POST /cart/change.js  { id, quantity }   (0 removes; id is a product id or a line key)
  *   POST /cart/clear.js
- *   POST /cart/coupon.js  { code | null }  (geçersiz kupon 422 + `type`, sepet değişmez; null / '' kaldırır)
+ *   POST /cart/coupon.js  { code | null }  (invalid coupon: 422 + `type`, the cart does not change; null / '' removes)
  */
 
-/** Sunucunun döndürdüğü satır */
+/** Line returned by the server */
 export interface ServerCartLine {
   key?: string;
   id: string;
@@ -34,7 +34,7 @@ export interface ServerCartLine {
   [key: string]: unknown;
 }
 
-/** Sepetten düşen satır: `not_found`, `unavailable`, `out_of_stock`, `cart_full` */
+/** Line dropped from the cart: `not_found`, `unavailable`, `out_of_stock`, `cart_full` */
 export interface CartRemovedNote {
   productId: string;
   key?: string;
@@ -43,7 +43,7 @@ export interface CartRemovedNote {
   reason: string;
 }
 
-/** Adedi düşürülen satır: `stock_limit`, `max_quantity` */
+/** Line whose quantity was reduced: `stock_limit`, `max_quantity` */
 export interface CartAdjustedNote {
   productId: string;
   key?: string;
@@ -53,17 +53,17 @@ export interface CartAdjustedNote {
   reason: string;
 }
 
-/** Sepetteki geçerli kuponun ayrıntısı (#476) */
+/** Details of the valid coupon in the cart (#476) */
 export interface CartCouponDetails {
   code: string;
   type: 'percentage' | 'fixed' | 'free_product';
-  /** Yüzde ya da mağaza para biriminde tutar; `free_product` için null olabilir */
+  /** Percentage or amount in the store currency; may be null for `free_product` */
   value: number | null;
-  /** `free_product` kuponunda hediye ürün; diğerlerinde null */
+  /** Gift product for a `free_product` coupon; null for others */
   freeProductId: string | null;
 }
 
-/** Saklı kupon geçersizleşip sepetten düşürüldü (#476); `reason` kupon hata kodu (bkz. `CouponErrorType`) */
+/** A stored coupon became invalid and was dropped from the cart (#476); `reason` is the coupon error code (see `CouponErrorType`) */
 export interface CartCouponRemovedNote {
   code: string;
   reason: string;
@@ -75,13 +75,13 @@ export interface ServerCartResponse {
   subtotal: number;
   currency: string;
   coupon: string | null;
-  /** Kupon indirimi, mağaza para biriminde (#476); kupon yoksa 0 */
+  /** Coupon discount in the store currency (#476); 0 without a coupon */
   discount?: number;
-  /** Ödenecek tutar: `subtotal - discount` (en az 0), mağaza para biriminde (#476) */
+  /** Amount to pay: `subtotal - discount` (at least 0), in the store currency (#476) */
   total?: number;
-  /** Geçerli kuponun ayrıntısı (#476); kupon yoksa null */
+  /** Details of the valid coupon (#476); null without a coupon */
   couponDetails?: CartCouponDetails | null;
-  /** Saklı kupon düşürüldüyse bir kez bildirilir (#476); yoksa null */
+  /** Reported once if a stored coupon was dropped (#476); null otherwise */
   couponRemoved?: CartCouponRemovedNote | null;
   removed?: CartRemovedNote[];
   adjusted?: CartAdjustedNote[];
@@ -89,14 +89,14 @@ export interface ServerCartResponse {
 }
 
 export interface ServerCartClientOptions {
-  /** Uçların kökü (bağlamın `routes.cartApi` değeri, ör. '/cart') */
+  /** Root of the endpoints (the context's `routes.cartApi` value, e.g. '/cart') */
   cartApi: string;
-  /** Ürün adlarının dili (`X-Crafter-Locale`) */
+  /** Language of product names (`X-Crafter-Locale`) */
   locale?: () => string | undefined;
   fetchImpl?: typeof fetch;
 }
 
-/** Başka sekmeye "sepet değişti" sinyali (yalnızca zaman damgası) */
+/** "Cart changed" signal for other tabs (timestamp only) */
 export const CART_SYNC_KEY = 'crafter_cart_sync';
 
 function storage(): Storage | null {
@@ -130,7 +130,7 @@ function couponRemovedOf(raw: any): CartCouponRemovedNote | null {
   return { code: raw.code, reason: typeof raw.reason === 'string' && raw.reason ? raw.reason : 'coupon_invalid' };
 }
 
-/** Yanıtı tip güvenli biçime getirir; bozuk satırlar atılır */
+/** Normalizes the response into a type-safe shape; corrupt lines are dropped */
 export function normalizeServerCart(raw: any): ServerCartResponse {
   const items: ServerCartLine[] = (Array.isArray(raw?.items) ? raw.items : [])
     .filter((item: any) => item && typeof item === 'object' && item.id !== undefined && item.id !== null)
@@ -151,7 +151,7 @@ export function normalizeServerCart(raw: any): ServerCartResponse {
       };
     });
   const subtotal = raw?.subtotal != null ? num(raw.subtotal) : items.reduce((sum, line) => sum + line.lineTotal, 0);
-  // Eski storefront indirim göndermez: indirim 0, toplam ara toplam
+  // Old storefronts send no discount: discount 0, total = subtotal
   const discount = Math.max(0, num(raw?.discount));
   return {
     items,
@@ -169,11 +169,11 @@ export function normalizeServerCart(raw: any): ServerCartResponse {
   };
 }
 
-/** localStorage sepetinin eşitlemede kullanılan hali: yalnızca ürün id + adet (fiyat sunucuda hesaplanır) */
+/** The localStorage cart as used by the sync: only product id + quantity (the price is calculated on the server) */
 export interface LegacyCart {
   items: Array<{ id: string; quantity: number }>;
   coupon: string | null;
-  /** `cart` anahtarı var mı ('[]' dahil): sepet boşaltıldıysa satırlar sunucudan da düşer */
+  /** Whether the `cart` key exists (including '[]'): if the cart was emptied, the lines are dropped on the server too */
   present: boolean;
 }
 
@@ -189,7 +189,7 @@ function readLegacyCart(store: Storage): LegacyCart | null {
   } catch {
     lines = [];
   }
-  // Aynı ürün iki satırda olsa da tek satır olur
+  // Even if the same product is on two lines it becomes one line
   const quantities = new Map<string, number>();
   for (const line of lines) {
     quantities.set(line.id, Math.min(MAX_LINE_QUANTITY, (quantities.get(line.id) ?? 0) + Math.min(MAX_LINE_QUANTITY, line.quantity)));
@@ -217,14 +217,14 @@ function writeSyncedSnapshot(store: Storage, items: LegacyCart['items'] | null):
     if (items === null) store.removeItem(CART_SYNCED_KEY);
     else store.setItem(CART_SYNCED_KEY, JSON.stringify(Object.fromEntries(items.map((item) => [item.id, item.quantity]))));
   } catch {
-    // Kota / gizli gezinme: sonraki sayfada yine gönderilir; `replace` olduğundan adetler katlanmaz
+    // Quota / private browsing: sent again on the next page; quantities do not double because of `replace`
   }
 }
 
 /**
- * localStorage sepetinin sunucuya uygulanacak farkı (#434 düzeltme; storefront checkout'uyla aynı kural):
- * `set` son eşitlemeden sonra eklenen / adedi değişen satırlar (adet ayarlanır), `remove` çıkarılan ürünler.
- * `synced` yoksa (ilk eşitleme) bütün satırlar yenidir. `cart` anahtarı yoksa satır silinmez.
+ * Difference of the localStorage cart to apply to the server (#434 fix; same rule as the storefront checkout):
+ * `set` lines added / whose quantity changed since the last sync (the quantity is set), `remove` products that were removed.
+ * Without `synced` (first sync) all lines are new. Without the `cart` key no line is removed.
  */
 export function legacyCartDiff(
   legacy: LegacyCart,
@@ -238,8 +238,8 @@ export function legacyCartDiff(
 }
 
 /**
- * Storefront sepet uçlarının istemcisi. İlk işlemden önce localStorage sepetini sunucu sepetiyle eşitler
- * (`migrate`); her değişiklikten sonra diğer sekmelere `crafter_cart_sync` sinyali yazar.
+ * Client for the storefront cart endpoints. Before the first operation it syncs the localStorage cart with the server cart
+ * (`migrate`); after every change it writes a `crafter_cart_sync` signal for other tabs.
  */
 export class ServerCartClient {
   private migration: Promise<ServerCartResponse | null> | null = null;
@@ -252,7 +252,7 @@ export class ServerCartClient {
 
   public async get(): Promise<ServerCartResponse> {
     const migrated = await this.migrate();
-    // Taşımada okunan sepet yalnızca ilk okumada kullanılır
+    // The cart read during migration is only used for the first read
     if (migrated && !this.migrationConsumed) {
       this.migrationConsumed = true;
       return migrated;
@@ -280,7 +280,7 @@ export class ServerCartClient {
     return this.mutate('coupon.js', { code });
   }
 
-  /** Başka sekmede değişince çağrılır; aboneliği kaldıran fonksiyon döner */
+  /** Called when it changes in another tab; returns a function that unsubscribes */
   public subscribe(onChange: () => void): () => void {
     if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return () => {};
     const listener = (event: StorageEvent) => {
@@ -291,20 +291,20 @@ export class ServerCartClient {
   }
 
   /**
-   * localStorage sepetini (`cart`: v1 temalar, SDK 1.4.0 ve öncesi, headless depo) sunucu sepetiyle eşitler; sayfa
-   * başına bir kez, ilk işlemden önce çalışır. Kural storefront checkout'uyla aynıdır (#434 düzeltme):
-   * - Son eşitlenen hal `crafter_cart_synced` kaydındadır. Ondan sonra eklenen ya da adedi değişen satır sunucuda bu
-   *   adede ayarlanır (`/cart/add.js { items, replace: true }`, toplanmaz); `cart`'tan çıkarılan satır sunucudan da
-   *   düşer (`/cart/change.js { quantity: 0 }`). Değişmeyen satır gönderilmez: sunucuda / başka cihazda yapılan
-   *   değişiklik korunur, sunucuda olup `cart`'ta hiç olmayan satırlar kalır. İlk eşitlemede bütün satırlar yenidir.
-   * - Sunucu sepeti dolu diye `cart` atılmaz (eski kural, eski ödenmemiş sunucu sepetinin yeni seçimin yerine geçmesine
-   *   yol açıyordu). Tekrar çalışması (iki sekme, ağ hatası sonrası) sonucu değiştirmez; adetler katlanmaz.
-   * - `cart` anahtarı kalır (tema sepeti); `cart` hiç yoksa sunucudan satır silinmez ve kayıt temizlenir.
-   * - Ağ / sunucu hatasında kayıt güncellenmez, sonraki sayfada yeniden denenir; 4xx ret (ör. ürün satıştan kalktı)
-   *   bu hali eşitlenmiş sayar.
-   * - Kupon (`crafter_cart_coupon`) sunucu sepetinde kupon yoksa ve sunucu kabul ederse taşınır (#476); 4xx ret
-   *   dönen sepette `couponRemoved: { code, reason }` olarak bir kez bildirilir. Denemeden sonra anahtar silinir.
-   * Dönüş: eşitleme sırasında okunan son sepet (yoksa null).
+   * Syncs the localStorage cart (`cart`: v1 themes, SDK 1.4.0 and earlier, headless store) with the server cart; runs once
+   * per page, before the first operation. The rule matches the storefront checkout (#434 fix):
+   * - The last synced state is in the `crafter_cart_synced` record. A line added or whose quantity changed after that is set to
+   *   this quantity on the server (`/cart/add.js { items, replace: true }`, not added); a line removed from `cart` is dropped
+   *   on the server too (`/cart/change.js { quantity: 0 }`). Unchanged lines are not sent: changes made on the server / another
+   *   device are kept, and lines that are on the server but never in `cart` stay. On the first sync all lines are new.
+   * - `cart` is not discarded just because the server cart is not empty (the old rule let an old unpaid server cart replace
+   *   the new selection). Running again (two tabs, after a network error) does not change the result; quantities do not double.
+   * - The `cart` key stays (the theme cart); if `cart` does not exist at all, no line is removed on the server and the record is cleared.
+   * - On a network / server error the record is not updated and it is retried on the next page; a 4xx rejection (e.g. the product
+   *   was taken off sale) counts this state as synced.
+   * - The coupon (`crafter_cart_coupon`) is moved if the server cart has no coupon and the server accepts it (#476); a 4xx rejection
+   *   is reported once in the returned cart as `couponRemoved: { code, reason }`. The key is removed after the attempt.
+   * Returns: the last cart read during the sync (null if none).
    */
   public migrate(): Promise<ServerCartResponse | null> {
     if (!this.migration) this.migration = this.runMigration();
@@ -345,7 +345,7 @@ export class ServerCartClient {
           changed = true;
         }
       } catch (error) {
-        // 4xx: satır geçersiz, bu hal eşitlenmiş sayılır; ağ / sunucu hatası dış catch'e gider (kayıt güncellenmez)
+        // 4xx: the line is invalid, this state counts as synced; network / server errors go to the outer catch (the record is not updated)
         if (!rejected(error)) throw error;
         writeSyncedSnapshot(store, current.items);
         if (changed) this.ping();
@@ -358,7 +358,7 @@ export class ServerCartClient {
             cart = await this.request('POST', `${this.base}/coupon.js`, { code: current.coupon });
             changed = true;
           } catch (error) {
-            // Geçersiz eski kupon taşınmaz. Ağ / sunucu hatası dış catch'e gider (kupon anahtarı korunur).
+            // An invalid old coupon is not moved. Network / server errors go to the outer catch (the coupon key is kept).
             if (!rejected(error)) throw error;
             cart = { ...cart, couponRemoved: { code: current.coupon, reason: (error as CrafterError).type || 'coupon_invalid' } };
           }
@@ -366,7 +366,7 @@ export class ServerCartClient {
         try {
           store.removeItem(CART_COUPON_KEY);
         } catch {
-          // yok sayılır
+          // ignored
         }
       }
       if (changed) this.ping();
@@ -387,14 +387,14 @@ export class ServerCartClient {
     try {
       storage()?.setItem(CART_SYNC_KEY, String(Date.now()));
     } catch {
-      // Gizli gezinme / kota: diğer sekmeler yenilenince görür
+      // Private browsing / quota: other tabs see it when they reload
     }
   }
 
   private async request(method: 'GET' | 'POST', url: string, body?: Record<string, unknown>): Promise<ServerCartResponse> {
     const doFetch = this.options.fetchImpl ?? (typeof fetch === 'function' ? fetch : undefined);
     if (!doFetch) {
-      throw new CrafterError({ statusCode: 503, type: 'cart_unavailable', message: '[Crafter SDK] fetch bulunamadı' });
+      throw new CrafterError({ statusCode: 503, type: 'cart_unavailable', message: '[Crafter SDK] fetch is not available' });
     }
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (method === 'POST') headers['Content-Type'] = 'application/json';
@@ -413,7 +413,7 @@ export class ServerCartClient {
       throw new CrafterError({
         statusCode: 503,
         type: 'cart_unavailable',
-        message: `[Crafter SDK] Sepete ulaşılamadı: ${error instanceof Error ? error.message : String(error)}`,
+        message: `[Crafter SDK] Could not reach the cart: ${error instanceof Error ? error.message : String(error)}`,
       });
     }
     const text = await response.text();

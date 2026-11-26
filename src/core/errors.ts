@@ -3,7 +3,7 @@ import { CrafterApiError } from '../types';
 export class CrafterError extends Error {
   public readonly statusCode: number;
   public readonly error?: string;
-  /** Backend hata kodu (ErrorType), ör. 'out_of_stock', 'balance_top_up_limit_exceeded' */
+  /** Backend error code (ErrorType), e.g. 'out_of_stock', 'balance_top_up_limit_exceeded' */
   public readonly type?: string;
   public readonly details?: Record<string, any>;
   public readonly isCrafterError = true;
@@ -63,7 +63,7 @@ export class CrafterError extends Error {
   }
 }
 
-/** Ödeme akışıyla ilgili backend hata kodları (ErrorType). */
+/** Backend error codes (ErrorType) related to the payment flow. */
 export const PaymentErrorType = {
   OUT_OF_STOCK: 'out_of_stock',
   BALANCE_TOP_UP_UNAVAILABLE: 'balance_top_up_unavailable',
@@ -77,13 +77,13 @@ export const PaymentErrorType = {
   PAYMENT_CONFIG_ERROR: 'payment_config_error',
   PAYMENT_INITIALIZATION_FAILED: 'payment_initialization_failed',
   PAYMENT_FAILED: 'payment_failed',
-  /** İstemcinin gönderdiği para birimi mağazanınkinden (ya da teklifinkinden) farklı */
+  /** The currency sent by the client differs from the store's (or the quote's) */
   PAYMENT_CURRENCY_MISMATCH: 'payment_currency_mismatch',
-  /** Sağlayıcı / satıcı bu para birimini desteklemiyor */
+  /** The provider / seller does not support this currency */
   PAYMENT_CURRENCY_UNSUPPORTED: 'payment_currency_unsupported',
-  /** Mağaza müşteri para birimini kapattı: ödeme mağaza para biriminde */
+  /** The store disabled the customer currency: payment is in the store currency */
   CUSTOMER_CURRENCY_NOT_ALLOWED: 'customer_currency_not_allowed',
-  /** Teklif bulunamadı / süresi doldu / sepet değişti: yeni teklif alınır */
+  /** Quote not found / expired / cart changed: get a new quote */
   PRESENTMENT_QUOTE_NOT_FOUND: 'presentment_quote_not_found',
   PRESENTMENT_QUOTE_EXPIRED: 'presentment_quote_expired',
   PRESENTMENT_QUOTE_MISMATCH: 'presentment_quote_mismatch',
@@ -104,8 +104,8 @@ const PAYMENT_PROVIDER_ERROR_TYPES: string[] = [
 ];
 
 /**
- * Kupon reddi (#476): `crafter.cart.setCoupon()` (storefront `POST /cart/coupon.js`, HTTP 422) ve kupon doğrulaması.
- * Sepet ayrıca `couponRemoved.reason` alanında aynı kodlarla bildirir (saklı kupon geçersizleşip düşürüldüyse).
+ * Coupon rejection (#476): `crafter.cart.setCoupon()` (storefront `POST /cart/coupon.js`, HTTP 422) and coupon validation.
+ * The cart also reports the same codes in `couponRemoved.reason` (when a stored coupon became invalid and was dropped).
  */
 export const CouponErrorType = {
   NOT_FOUND: 'coupon_not_found',
@@ -113,7 +113,7 @@ export const CouponErrorType = {
   USAGE_LIMIT_REACHED: 'coupon_usage_limit_reached',
   ALREADY_USED_BY_USER: 'coupon_already_used_by_user',
   NOT_ASSIGNED_TO_USER: 'coupon_not_assigned_to_user',
-  /** Sepet tutarı kuponun alt sınırının altında (`details.minCartValue`, mağaza para biriminde) */
+  /** Cart total is below the coupon's minimum (`details.minCartValue`, in the store currency) */
   CART_TOTAL_BELOW_MINIMUM: 'coupon_cart_total_below_minimum',
   INVALID_FOR_PRODUCT: 'coupon_invalid_for_product',
   INVALID_TYPE: 'coupon_invalid_type',
@@ -121,17 +121,17 @@ export const CouponErrorType = {
 
 export type CouponErrorTypeValue = (typeof CouponErrorType)[keyof typeof CouponErrorType];
 
-/** Kupon hata kodlarının listesi */
+/** List of coupon error codes */
 export const COUPON_ERROR_TYPES: string[] = Object.values(CouponErrorType);
 
 type ErrorPayload = ConstructorParameters<typeof CrafterError>[0];
 
 /**
- * Kupon reddedildi (#476). `message` sayfanın dilinde, doğrudan gösterilebilir; `type` için `CouponErrorType`.
- * Reddedilen kupon sepete yazılmaz, sepet değişmez.
+ * Coupon rejected (#476). `message` is in the page language and can be shown as is; see `CouponErrorType` for `type`.
+ * A rejected coupon is not written to the cart and the cart does not change.
  */
 export class CrafterCouponError extends CrafterError {
-  /** `coupon_cart_total_below_minimum` ise kuponun alt sınırı (`details.minCartValue`); yoksa null */
+  /** The coupon's minimum (`details.minCartValue`) for `coupon_cart_total_below_minimum`; null otherwise */
   public readonly minCartValue: number | null;
 
   constructor(payload: ErrorPayload) {
@@ -142,9 +142,9 @@ export class CrafterCouponError extends CrafterError {
   }
 }
 
-/** Stok ödeme başlatılırken yetersiz çıktı (HTTP 409, `out_of_stock`). */
+/** Stock turned out to be insufficient when starting payment (HTTP 409, `out_of_stock`). */
 export class CrafterOutOfStockError extends CrafterError {
-  /** Tükenen ürünlerin kimlikleri (`details.productIds`); backend göndermediyse boş */
+  /** IDs of the sold-out products (`details.productIds`); empty if the backend did not send them */
   public readonly productIds: string[];
 
   constructor(payload: ErrorPayload) {
@@ -155,7 +155,7 @@ export class CrafterOutOfStockError extends CrafterError {
   }
 }
 
-/** Bakiye yükleme limit bilgisi (hata `details` alanından). */
+/** Balance top-up limit info (from the error's `details` field). */
 export interface BalanceTopUpLimits {
   currency?: string;
   maxSingleUsd?: number;
@@ -164,10 +164,10 @@ export interface BalanceTopUpLimits {
   remainingAmount?: number | null;
 }
 
-/** Bakiye yüklemesi reddedildi: kapalı, tek yükleme limiti veya toplam ödenmiş bakiye limiti aşıldı. */
+/** Balance top-up rejected: disabled, single top-up limit or total paid balance limit exceeded. */
 export class CrafterBalanceTopUpError extends CrafterError {
   public readonly reason: 'unavailable' | 'single_limit' | 'total_limit';
-  /** Limit hatalarında backend'in döndürdüğü limitler; `unavailable` için null */
+  /** Limits returned by the backend for limit errors; null for `unavailable` */
   public readonly limits: BalanceTopUpLimits | null;
 
   constructor(payload: ErrorPayload) {
@@ -194,11 +194,11 @@ export class CrafterBalanceTopUpError extends CrafterError {
 }
 
 /**
- * Ödeme sağlayıcısı / altyapı hatası: sağlayıcı bulunamadı, satıcı altyapısı hazır değil,
- * Stripe Tax vergi hesaplanamadı, ödeme başlatılamadı vb. `type` alanı ayrıntıyı verir.
+ * Payment provider / infrastructure error: provider not found, seller infrastructure not ready,
+ * Stripe Tax could not calculate tax, payment could not start, etc. The `type` field gives the detail.
  */
 export class CrafterPaymentProviderError extends CrafterError {
-  /** Kullanıcı aynı bilgilerle biraz sonra tekrar deneyebilir mi */
+  /** Whether the user can retry with the same details a little later */
   public readonly retryable: boolean;
 
   constructor(payload: ErrorPayload) {
@@ -223,7 +223,7 @@ export function isBalanceTopUpError(err: unknown): err is CrafterBalanceTopUpErr
   return err instanceof CrafterBalanceTopUpError;
 }
 
-/** Kupon reddi mi (`CrafterCouponError` ya da kupon hata kodlu `CrafterError`) */
+/** Whether this is a coupon rejection (`CrafterCouponError` or a `CrafterError` with a coupon error code) */
 export function isCouponError(err: unknown): err is CrafterCouponError {
   return (
     err instanceof CrafterCouponError ||

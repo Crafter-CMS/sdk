@@ -76,40 +76,40 @@ declare class EventEmitter {
     removeAllListeners(event?: string): void;
 }
 
-/** Payment modülünün kullandığı yapılandırma alanları */
+/** Configuration fields used by the payment module */
 type PaymentsModuleOptions = Pick<CrafterConfig, 'websiteId' | 'stripePublishableKey'>;
-/** Backend yanıtındaki Stripe Tax alanlarından tipli vergi kırılımı; `subtotal` yoksa null. */
+/** Typed tax breakdown from the Stripe Tax fields in the backend response; null if there is no `subtotal`. */
 declare function parseTaxBreakdown(raw: Record<string, any> | null | undefined): PaymentTaxBreakdown | null;
 /**
- * Ödeme başlatma / sepet ödeme yanıtını normalize eder (eklemeli: ham alanlar korunur).
- * - `paymentId`: backend `payment_id` döndürür; `paymentId` yoksa doldurulur.
- * - `tax`: Stripe Tax kırılımı (yoksa null).
- * - `stripe`: yalnızca `type === 'stripe'` ve `clientSecret` varsa (satıcı LLC + CrafterPayments).
+ * Normalizes the payment initiation / cart payment response (additive: raw fields are kept).
+ * - `paymentId`: the backend returns `payment_id`; `paymentId` is filled if missing.
+ * - `tax`: Stripe Tax breakdown (null if absent).
+ * - `stripe`: only when `type === 'stripe'` and `clientSecret` exists (seller LLC + CrafterPayments).
  */
 declare function normalizePaymentResponse<T extends Record<string, any>>(raw: T, fallbackPublishableKey?: string | null): T & InitiatePaymentResponse;
-/** Alıcının onayladığı sözleşme sürümü / bölge eki (CrafterPayments onay kaydı, chargeback kanıtı). */
+/** Terms version / region suffix the buyer accepted (CrafterPayments consent record, chargeback evidence). */
 interface LegalTermsConsent {
     version: string;
     region?: string;
 }
-/** Sözleşme onayı başlıkları: x-legal-terms-version / x-legal-terms-region */
+/** Terms consent headers: x-legal-terms-version / x-legal-terms-region */
 declare function legalTermsHeaders(consent?: LegalTermsConsent): Record<string, string> | undefined;
 /**
- * Müşteri para biriminde ödeme (#424, #426): teklif alınır, ödeme `quoteId` ve teklifin para birimiyle başlatılır.
- * Teklif süresi dolduysa / sepet değiştiyse bir kez yeni teklif alınır. Mağaza müşteri para birimini kapattıysa
- * (`customer_currency_not_allowed`) ödeme teklifsiz, mağaza para biriminde başlatılır (`customerCurrencyDisabled`).
- * Diğer hatalar olduğu gibi fırlatılır.
+ * Payment in the customer currency (#424, #426): a quote is fetched, payment starts with `quoteId` and the quote's currency.
+ * If the quote expired / the cart changed, a new quote is fetched once. If the store disabled the customer currency
+ * (`customer_currency_not_allowed`), payment starts without a quote, in the store currency (`customerCurrencyDisabled`).
+ * Other errors are thrown as is.
  */
 declare function payWithQuote<T extends Record<string, any>>(getQuote: () => Promise<PresentmentQuote>, pay: (quote: PresentmentQuote | null) => Promise<T>): Promise<T & {
     customerCurrencyDisabled: boolean;
 }>;
 /**
- * Public durum yanıtını yorumlar. Backend'in public `delivery` özeti:
- * pending → PENDING, delivered → DELIVERED, failed → NEEDS_REVIEW (teslim edilemedi / incelemede), refunded → REFUNDED.
- * Backend ileride `deliveryStatus` döndürürse o kullanılır.
+ * Interprets the public status response. The backend's public `delivery` summary:
+ * pending → PENDING, delivered → DELIVERED, failed → NEEDS_REVIEW (could not be delivered / under review), refunded → REFUNDED.
+ * If the backend returns `deliveryStatus` in the future, that is used.
  */
 declare function parsePaymentStatus(paymentId: string, raw: Record<string, any> | null | undefined): PaymentStatusResult;
-/** Formdaki en yüksek bakiye yükleme tutarı: sağlayıcı üst sınırı, tek yükleme limiti ve kalan ödenmiş bakiye hakkı. */
+/** Highest balance top-up amount for the form: provider cap, single top-up limit and the remaining paid balance allowance. */
 declare function topUpMaxAmount(policy: BalanceTopUpPolicy | null | undefined, providerMax?: number): number;
 declare class PaymentsModule {
     private http;
@@ -123,7 +123,7 @@ declare class PaymentsModule {
     getPublicProviders(): Promise<PublicPaymentProvider[]>;
     /**
      * Initiate a payment session (PayTR, Shopier, KuveytTürk, CrafterPayments etc.).
-     * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi) bulunur.
+     * When the seller is an LLC with CrafterPayments, the response includes `stripe` (clientSecret, publishableKey, tax).
      * POST /payment/initiate
      */
     initiate(data: InitiatePaymentDto | (Omit<InitiatePaymentDto, 'providerId'> & {
@@ -133,9 +133,9 @@ declare class PaymentsModule {
         legalTerms?: LegalTermsConsent;
     } & CustomerCurrencyOptions): Promise<InitiatePaymentResponse>;
     /**
-     * Kilitli kur teklifi (~30 dk): tutar mağaza para biriminde hesaplanır, müşterinin para birimini sunucu belirler
-     * (`currency` yalnızca öneridir). Ödeme `quoteId` ile başlatılır. Oturum gerektirir.
-     * Mağaza müşteri para birimini kapattıysa 400 `customer_currency_not_allowed`.
+     * Locked rate quote (~30 min): the amount is calculated in the store currency, the server decides the customer's currency
+     * (`currency` is only a suggestion). Payment starts with `quoteId`. Requires a session.
+     * 400 `customer_currency_not_allowed` if the store disabled the customer currency.
      * POST /payment/quote
      */
     quote(data: PresentmentQuoteRequest): Promise<PresentmentQuote>;
@@ -145,34 +145,34 @@ declare class PaymentsModule {
      */
     check(paymentId: string): Promise<CheckPaymentResponse>;
     /**
-     * Ödeme ve teslimat durumu (oturum gerektirmez). Stripe ödemesinde webhook gecikirse backend ödemeyi Stripe'tan okur.
+     * Payment and delivery status (no session required). For a Stripe payment, if the webhook is late the backend reads the payment from Stripe.
      * GET /payment/status/:paymentId
      */
     getStatus(paymentId: string): Promise<PaymentStatusResult>;
     /**
-     * Ödeme sonucu kesinleşene kadar `getStatus` ile yoklar (Stripe `confirmPayment` sonrası).
-     * Ödeme alındı ama teslimat sürüyorsa yoklama devam eder. Süre dolarsa son görülen durum döner.
-     * Ağ hataları yutulur, yoklama sürer.
+     * Polls with `getStatus` until the payment result is final (after Stripe `confirmPayment`).
+     * If the payment was received but delivery is still running, polling continues. On timeout the last seen status is returned.
+     * Network errors are swallowed and polling continues.
      */
     waitForResult(paymentId: string, options?: WaitForPaymentOptions): Promise<PaymentStatusResult>;
     /**
-     * Bakiye yükleme koşulları: açık mı, limitler (USD ve mağaza para birimi), ödenmiş / bonus bakiye
-     * ve koşul metninin gösterilip gösterilmeyeceği (`showTerms`). Oturum gerektirir.
+     * Balance top-up conditions: whether enabled, limits (USD and the store currency), paid / bonus balance
+     * and whether to show the terms text (`showTerms`). Requires a session.
      * GET /payment/balance-top-up/policy?websiteId=
      */
     getTopUpPolicy(websiteId?: string): Promise<BalanceTopUpPolicy>;
 }
 
 /**
- * localStorage sepet deposu (#447): 'cart' ve 'crafter_cart_coupon' anahtarları. Headless kullanımda ve sepet uçları
- * olmayan sayfalarda kullanılır. Storefront içinde sepet sunucudadır (#434, `cart-server.ts`); `cart` kaydı oradan
- * değişen satırlarıyla sunucu sepetine eşitlenir (`crafter_cart_synced` son eşitlenen hali tutar), kupon bir kez taşınır.
+ * localStorage cart store (#447): the 'cart' and 'crafter_cart_coupon' keys. Used in headless mode and on pages without
+ * cart endpoints. Inside the storefront the cart lives on the server (#434, `cart-server.ts`); the `cart` record is synced
+ * to the server cart by its changed lines (`crafter_cart_synced` keeps the last synced state), the coupon is moved once.
  */
-/** Depodaki satır: checkout'un okuduğu alanlar */
+/** Line in the store: the fields checkout reads */
 interface StoredCartLine {
     id: string;
     name: string;
-    /** Birim fiyat, mağaza para biriminde (indirimsiz) */
+    /** Unit price in the store currency (before discount) */
     price: number;
     quantity: number;
     discountType?: string | null;
@@ -185,17 +185,17 @@ interface CartStore {
     write(lines: StoredCartLine[]): Promise<void>;
     readCoupon(): Promise<string | null>;
     writeCoupon(code: string | null): Promise<void>;
-    /** Başka sekmede ya da dışarıda değişince çağrılır; aboneliği kaldıran fonksiyon döner */
+    /** Called when it changes in another tab or elsewhere; returns a function that unsubscribes */
     subscribe(onChange: () => void): () => void;
 }
 declare const CART_STORAGE_KEY = "cart";
 declare const CART_COUPON_KEY = "crafter_cart_coupon";
 /**
- * Son eşitlenen localStorage sepeti (#434 düzeltme): `{ [ürün id]: adet }`. Storefront checkout'u da aynı anahtarı ve
- * biçimi kullanır; `cart` kaydında bundan sonra değişen satırlar sunucu sepetine uygulanır.
+ * The last synced localStorage cart (#434 fix): `{ [product id]: quantity }`. The storefront checkout uses the same key and
+ * format; lines in the `cart` record that change after this are applied to the server cart.
  */
 declare const CART_SYNCED_KEY = "crafter_cart_synced";
-/** Bozuk kayıtları ayıklar; id'siz satır atılır, miktar en az 1 tam sayı */
+/** Drops corrupt records; lines without an id are dropped, quantity is an integer of at least 1 */
 declare function normalizeLines(raw: unknown): StoredCartLine[];
 declare class LocalStorageCartStore implements CartStore {
     read(): Promise<StoredCartLine[]>;
@@ -206,17 +206,17 @@ declare class LocalStorageCartStore implements CartStore {
 }
 
 /**
- * Hibrit sepet (#434): storefront'un sepet uçları. Ziyaretçide sepet storefront'un imzalı çerezinde, giriş yapmış
- * müşteride sunucuda tutulur; SDK iki modu ayırt etmez. Uçlar aynı kökenli ve çerezlidir (`credentials: 'same-origin'`).
- * Fiyat gönderilmez: sunucu güncel üründen hesaplar.
+ * Hybrid cart (#434): the storefront's cart endpoints. For a visitor the cart is kept in the storefront's signed cookie, for a
+ * logged-in customer on the server; the SDK does not tell the two modes apart. The endpoints are same-origin with cookies (`credentials: 'same-origin'`).
+ * No price is sent: the server calculates it from the current product.
  *   GET  /cart.js
  *   POST /cart/add.js     { id, quantity, options? } | { items: [{ id, quantity }], replace? }
- *                         (`replace: true`: adet verilen değere ayarlanır, toplanmaz; localStorage eşitlemesi kullanır)
- *   POST /cart/change.js  { id, quantity }   (0 siler; id ürün id'si ya da satır anahtarı)
+ *                         (`replace: true`: the quantity is set to the given value, not added; used by the localStorage sync)
+ *   POST /cart/change.js  { id, quantity }   (0 removes; id is a product id or a line key)
  *   POST /cart/clear.js
- *   POST /cart/coupon.js  { code | null }  (geçersiz kupon 422 + `type`, sepet değişmez; null / '' kaldırır)
+ *   POST /cart/coupon.js  { code | null }  (invalid coupon: 422 + `type`, the cart does not change; null / '' removes)
  */
-/** Sunucunun döndürdüğü satır */
+/** Line returned by the server */
 interface ServerCartLine {
     key?: string;
     id: string;
@@ -236,7 +236,7 @@ interface ServerCartLine {
     options?: Record<string, string> | null;
     [key: string]: unknown;
 }
-/** Sepetten düşen satır: `not_found`, `unavailable`, `out_of_stock`, `cart_full` */
+/** Line dropped from the cart: `not_found`, `unavailable`, `out_of_stock`, `cart_full` */
 interface CartRemovedNote {
     productId: string;
     key?: string;
@@ -244,7 +244,7 @@ interface CartRemovedNote {
     quantity: number;
     reason: string;
 }
-/** Adedi düşürülen satır: `stock_limit`, `max_quantity` */
+/** Line whose quantity was reduced: `stock_limit`, `max_quantity` */
 interface CartAdjustedNote {
     productId: string;
     key?: string;
@@ -253,16 +253,16 @@ interface CartAdjustedNote {
     to: number;
     reason: string;
 }
-/** Sepetteki geçerli kuponun ayrıntısı (#476) */
+/** Details of the valid coupon in the cart (#476) */
 interface CartCouponDetails {
     code: string;
     type: 'percentage' | 'fixed' | 'free_product';
-    /** Yüzde ya da mağaza para biriminde tutar; `free_product` için null olabilir */
+    /** Percentage or amount in the store currency; may be null for `free_product` */
     value: number | null;
-    /** `free_product` kuponunda hediye ürün; diğerlerinde null */
+    /** Gift product for a `free_product` coupon; null for others */
     freeProductId: string | null;
 }
-/** Saklı kupon geçersizleşip sepetten düşürüldü (#476); `reason` kupon hata kodu (bkz. `CouponErrorType`) */
+/** A stored coupon became invalid and was dropped from the cart (#476); `reason` is the coupon error code (see `CouponErrorType`) */
 interface CartCouponRemovedNote {
     code: string;
     reason: string;
@@ -273,43 +273,43 @@ interface ServerCartResponse {
     subtotal: number;
     currency: string;
     coupon: string | null;
-    /** Kupon indirimi, mağaza para biriminde (#476); kupon yoksa 0 */
+    /** Coupon discount in the store currency (#476); 0 without a coupon */
     discount?: number;
-    /** Ödenecek tutar: `subtotal - discount` (en az 0), mağaza para biriminde (#476) */
+    /** Amount to pay: `subtotal - discount` (at least 0), in the store currency (#476) */
     total?: number;
-    /** Geçerli kuponun ayrıntısı (#476); kupon yoksa null */
+    /** Details of the valid coupon (#476); null without a coupon */
     couponDetails?: CartCouponDetails | null;
-    /** Saklı kupon düşürüldüyse bir kez bildirilir (#476); yoksa null */
+    /** Reported once if a stored coupon was dropped (#476); null otherwise */
     couponRemoved?: CartCouponRemovedNote | null;
     removed?: CartRemovedNote[];
     adjusted?: CartAdjustedNote[];
     mode?: 'guest' | 'customer';
 }
 interface ServerCartClientOptions {
-    /** Uçların kökü (bağlamın `routes.cartApi` değeri, ör. '/cart') */
+    /** Root of the endpoints (the context's `routes.cartApi` value, e.g. '/cart') */
     cartApi: string;
-    /** Ürün adlarının dili (`X-Crafter-Locale`) */
+    /** Language of product names (`X-Crafter-Locale`) */
     locale?: () => string | undefined;
     fetchImpl?: typeof fetch;
 }
-/** Başka sekmeye "sepet değişti" sinyali (yalnızca zaman damgası) */
+/** "Cart changed" signal for other tabs (timestamp only) */
 declare const CART_SYNC_KEY = "crafter_cart_sync";
-/** Yanıtı tip güvenli biçime getirir; bozuk satırlar atılır */
+/** Normalizes the response into a type-safe shape; corrupt lines are dropped */
 declare function normalizeServerCart(raw: any): ServerCartResponse;
-/** localStorage sepetinin eşitlemede kullanılan hali: yalnızca ürün id + adet (fiyat sunucuda hesaplanır) */
+/** The localStorage cart as used by the sync: only product id + quantity (the price is calculated on the server) */
 interface LegacyCart {
     items: Array<{
         id: string;
         quantity: number;
     }>;
     coupon: string | null;
-    /** `cart` anahtarı var mı ('[]' dahil): sepet boşaltıldıysa satırlar sunucudan da düşer */
+    /** Whether the `cart` key exists (including '[]'): if the cart was emptied, the lines are dropped on the server too */
     present: boolean;
 }
 /**
- * localStorage sepetinin sunucuya uygulanacak farkı (#434 düzeltme; storefront checkout'uyla aynı kural):
- * `set` son eşitlemeden sonra eklenen / adedi değişen satırlar (adet ayarlanır), `remove` çıkarılan ürünler.
- * `synced` yoksa (ilk eşitleme) bütün satırlar yenidir. `cart` anahtarı yoksa satır silinmez.
+ * Difference of the localStorage cart to apply to the server (#434 fix; same rule as the storefront checkout):
+ * `set` lines added / whose quantity changed since the last sync (the quantity is set), `remove` products that were removed.
+ * Without `synced` (first sync) all lines are new. Without the `cart` key no line is removed.
  */
 declare function legacyCartDiff(legacy: LegacyCart, synced: Map<string, number> | null): {
     set: Array<{
@@ -319,8 +319,8 @@ declare function legacyCartDiff(legacy: LegacyCart, synced: Map<string, number> 
     remove: string[];
 };
 /**
- * Storefront sepet uçlarının istemcisi. İlk işlemden önce localStorage sepetini sunucu sepetiyle eşitler
- * (`migrate`); her değişiklikten sonra diğer sekmelere `crafter_cart_sync` sinyali yazar.
+ * Client for the storefront cart endpoints. Before the first operation it syncs the localStorage cart with the server cart
+ * (`migrate`); after every change it writes a `crafter_cart_sync` signal for other tabs.
  */
 declare class ServerCartClient {
     private readonly options;
@@ -333,23 +333,23 @@ declare class ServerCartClient {
     change(id: string, quantity: number): Promise<ServerCartResponse>;
     clear(): Promise<ServerCartResponse>;
     setCoupon(code: string | null): Promise<ServerCartResponse>;
-    /** Başka sekmede değişince çağrılır; aboneliği kaldıran fonksiyon döner */
+    /** Called when it changes in another tab; returns a function that unsubscribes */
     subscribe(onChange: () => void): () => void;
     /**
-     * localStorage sepetini (`cart`: v1 temalar, SDK 1.4.0 ve öncesi, headless depo) sunucu sepetiyle eşitler; sayfa
-     * başına bir kez, ilk işlemden önce çalışır. Kural storefront checkout'uyla aynıdır (#434 düzeltme):
-     * - Son eşitlenen hal `crafter_cart_synced` kaydındadır. Ondan sonra eklenen ya da adedi değişen satır sunucuda bu
-     *   adede ayarlanır (`/cart/add.js { items, replace: true }`, toplanmaz); `cart`'tan çıkarılan satır sunucudan da
-     *   düşer (`/cart/change.js { quantity: 0 }`). Değişmeyen satır gönderilmez: sunucuda / başka cihazda yapılan
-     *   değişiklik korunur, sunucuda olup `cart`'ta hiç olmayan satırlar kalır. İlk eşitlemede bütün satırlar yenidir.
-     * - Sunucu sepeti dolu diye `cart` atılmaz (eski kural, eski ödenmemiş sunucu sepetinin yeni seçimin yerine geçmesine
-     *   yol açıyordu). Tekrar çalışması (iki sekme, ağ hatası sonrası) sonucu değiştirmez; adetler katlanmaz.
-     * - `cart` anahtarı kalır (tema sepeti); `cart` hiç yoksa sunucudan satır silinmez ve kayıt temizlenir.
-     * - Ağ / sunucu hatasında kayıt güncellenmez, sonraki sayfada yeniden denenir; 4xx ret (ör. ürün satıştan kalktı)
-     *   bu hali eşitlenmiş sayar.
-     * - Kupon (`crafter_cart_coupon`) sunucu sepetinde kupon yoksa ve sunucu kabul ederse taşınır (#476); 4xx ret
-     *   dönen sepette `couponRemoved: { code, reason }` olarak bir kez bildirilir. Denemeden sonra anahtar silinir.
-     * Dönüş: eşitleme sırasında okunan son sepet (yoksa null).
+     * Syncs the localStorage cart (`cart`: v1 themes, SDK 1.4.0 and earlier, headless store) with the server cart; runs once
+     * per page, before the first operation. The rule matches the storefront checkout (#434 fix):
+     * - The last synced state is in the `crafter_cart_synced` record. A line added or whose quantity changed after that is set to
+     *   this quantity on the server (`/cart/add.js { items, replace: true }`, not added); a line removed from `cart` is dropped
+     *   on the server too (`/cart/change.js { quantity: 0 }`). Unchanged lines are not sent: changes made on the server / another
+     *   device are kept, and lines that are on the server but never in `cart` stay. On the first sync all lines are new.
+     * - `cart` is not discarded just because the server cart is not empty (the old rule let an old unpaid server cart replace
+     *   the new selection). Running again (two tabs, after a network error) does not change the result; quantities do not double.
+     * - The `cart` key stays (the theme cart); if `cart` does not exist at all, no line is removed on the server and the record is cleared.
+     * - On a network / server error the record is not updated and it is retried on the next page; a 4xx rejection (e.g. the product
+     *   was taken off sale) counts this state as synced.
+     * - The coupon (`crafter_cart_coupon`) is moved if the server cart has no coupon and the server accepts it (#476); a 4xx rejection
+     *   is reported once in the returned cart as `couponRemoved: { code, reason }`. The key is removed after the attempt.
+     * Returns: the last cart read during the sync (null if none).
      */
     migrate(): Promise<ServerCartResponse | null>;
     private runMigration;
@@ -359,8 +359,8 @@ declare class ServerCartClient {
 }
 
 /**
- * Tema olayları (#447): SDK değişiklikleri hem kendi olay yoluna (`crafter.on('cart:updated')`) hem de
- * `document` üzerine `crafter:<ad>` CustomEvent olarak yayar. Temalar SDK örneğini beklemeden dinleyebilir:
+ * Theme events (#447): the SDK emits changes both on its own event bus (`crafter.on('cart:updated')`) and as a
+ * `crafter:<name>` CustomEvent on `document`. Themes can listen without waiting for the SDK instance:
  *   document.addEventListener('crafter:cart:updated', (e) => e.detail.itemCount)
  */
 declare const DOM_EVENTS: {
@@ -369,69 +369,69 @@ declare const DOM_EVENTS: {
     readonly localizationChanged: "crafter:localization:changed";
 };
 type DomEventName = (typeof DOM_EVENTS)[keyof typeof DOM_EVENTS];
-/** `document` üzerine `crafter:<name>` olayı; tarayıcı dışında sessizce atlanır */
+/** `crafter:<name>` event on `document`; silently skipped outside the browser */
 declare function dispatchDomEvent(name: string, detail?: unknown): void;
 declare class DomEvents {
     private events;
     constructor(events: EventEmitter);
-    /** SDK olay yoluna ve `document`'a birlikte yayar */
+    /** Emits on the SDK event bus and on `document` together */
     emit(name: string, detail?: unknown): void;
     /**
-     * `document` üzerindeki `crafter:<name>` olayını dinler; işleyici `event.detail` alır. Aboneliği kaldıran fonksiyon döner.
+     * Listens for the `crafter:<name>` event on `document`; the handler receives `event.detail`. Returns a function that unsubscribes.
      * @example crafter.dom.on('cart:updated', (cart) => badge.textContent = cart.itemCount)
      */
     on(name: string, handler: (detail: any) => void): () => void;
 }
 
-/** Sepete eklenecek ürün; tema genelde `data-*` özniteliklerinden verir */
+/** Product to add to the cart; themes usually pass it from `data-*` attributes */
 interface CartAddInput {
     id: string | number;
     name?: string;
-    /** Birim fiyat, mağaza para biriminde. Storefront sepetinde gönderilmez: fiyatı sunucu hesaplar. */
+    /** Unit price in the store currency. Not sent for the storefront cart: the server calculates the price. */
     price?: number | string;
     discountType?: string | null;
     discountValue?: number | string | null;
     image?: string | null;
     images?: string[];
-    /** Varyant / seçenekler (storefront sepeti) */
+    /** Variant / options (storefront cart) */
     options?: Record<string, string> | null;
 }
-/** Sepet satırı: depodaki alanlar + hesaplananlar (mağaza para biriminde) */
+/** Cart line: stored fields + calculated ones (in the store currency) */
 interface CartLine extends StoredCartLine {
-    /** İlk görsel; yoksa null */
+    /** First image; null if none */
     image: string | null;
-    /** İndirim uygulanmış birim fiyat */
+    /** Unit price with the discount applied */
     unitPrice: number;
     lineTotal: number;
 }
 interface CartState {
     items: CartLine[];
-    /** Toplam adet */
+    /** Total quantity */
     itemCount: number;
-    /** Ara toplam, mağaza para biriminde; gösterim için `crafter.money.format(cart.subtotal)` */
+    /** Subtotal in the store currency; for display use `crafter.money.format(cart.subtotal)` */
     subtotal: number;
-    /** Mağaza para birimi (sayfa bağlamından); bilinmiyorsa boş */
+    /** Store currency (from the page context); empty if unknown */
     currency: string;
     coupon: string | null;
     /**
-     * Kupon indirimi, mağaza para biriminde (#476); kupon yoksa 0. localStorage sepeti kuponu doğrulayamaz: her zaman 0.
+     * Coupon discount in the store currency (#476); 0 without a coupon. The localStorage cart cannot validate coupons: always 0.
      */
     discount?: number;
-    /** Ödenecek tutar: `subtotal - discount` (en az 0), mağaza para biriminde (#476) */
+    /** Amount to pay: `subtotal - discount` (at least 0), in the store currency (#476) */
     total?: number;
-    /** Geçerli kuponun ayrıntısı (#476): `code`, `type`, `value`, `freeProductId`; kupon yoksa (ya da localStorage) null */
+    /** Details of the valid coupon (#476): `code`, `type`, `value`, `freeProductId`; null without a coupon (or with localStorage) */
     couponDetails?: CartCouponDetails | null;
     /**
-     * Storefront sepeti (#476): saklı kupon geçersizleştiği için düşürüldüyse bir kez bildirilir (`code`, `reason`:
-     * `CouponErrorType` kodu, ör. `coupon_cart_total_below_minimum`); yoksa null
+     * Storefront cart (#476): reported once if a stored coupon was dropped because it became invalid (`code`, `reason`:
+     * a `CouponErrorType` code, e.g. `coupon_cart_total_below_minimum`); null otherwise
      */
     couponRemoved?: CartCouponRemovedNote | null;
-    /** Storefront sepeti (#434): satıştan kalkan / tükenen ürün düştüyse bir kez bildirilir */
+    /** Storefront cart (#434): reported once if a product that was taken off sale / sold out was dropped */
     removed?: CartRemovedNote[];
-    /** Storefront sepeti (#434): adet stoğa göre düşürüldüyse bir kez bildirilir */
+    /** Storefront cart (#434): reported once if a quantity was reduced to match stock */
     adjusted?: CartAdjustedNote[];
 }
-/** Sepetin işlemleri; `crafter.cart` bunlara devreder (localStorage ya da storefront sunucusu) */
+/** Cart operations; `crafter.cart` delegates to these (localStorage or the storefront server) */
 interface CartBackend {
     get(): Promise<CartState>;
     add(product: CartAddInput, quantity: number): Promise<CartState>;
@@ -439,27 +439,27 @@ interface CartBackend {
     remove(id: string): Promise<CartState>;
     clear(): Promise<CartState>;
     setCoupon(code: string | null): Promise<CartState>;
-    /** Başka sekmede değişince çağrılır; aboneliği kaldıran fonksiyon döner */
+    /** Called when it changes in another tab; returns a function that unsubscribes */
     subscribe(onChange: () => void): () => void;
 }
 interface CartModuleDeps {
-    /** Sepet deposu (localStorage 'cart' biçimi). Verilirse her zaman bu depo kullanılır. */
+    /** Cart store (localStorage 'cart' format). If given, this store is always used. */
     store?: CartStore;
     /**
-     * Storefront sepet uçları (#434): bağlamın `routes.cartApi` değeri (ör. '/cart'). Verilirse sepet sunucudadır
-     * (ziyaretçide imzalı çerez, giriş yapınca hesap); yoksa localStorage.
+     * Storefront cart endpoints (#434): the context's `routes.cartApi` value (e.g. '/cart'). If given, the cart lives on the server
+     * (a signed cookie for visitors, the account once logged in); otherwise localStorage.
      */
     cartApi?: string | null;
-    /** Storefront sepetinde ürün adlarının dili */
+    /** Language of product names in the storefront cart */
     locale?: () => string | undefined;
-    /** Testler için */
+    /** For tests */
     fetchImpl?: typeof fetch;
     dom?: DomEvents;
     storeCurrency?: () => string;
 }
-/** İndirim uygulanmış birim fiyat: 'percentage' yüzde, diğer tipler sabit tutar (checkout ile aynı kural) */
+/** Unit price with the discount applied: 'percentage' is a percentage, other types are a fixed amount (same rule as checkout) */
 declare function discountedUnitPrice(line: Pick<StoredCartLine, 'price' | 'discountType' | 'discountValue'>): number;
-/** localStorage sepeti (#447): headless kullanım ve sepet uçları olmayan sayfalar */
+/** localStorage cart (#447): headless use and pages without cart endpoints */
 declare class LocalCartBackend implements CartBackend {
     private store;
     private storeCurrency;
@@ -473,9 +473,9 @@ declare class LocalCartBackend implements CartBackend {
     subscribe(onChange: () => void): () => void;
     private commit;
 }
-/** Sunucu yanıtı → `CartState` (tutarlar mağaza para biriminde, sunucu hesaplar) */
+/** Server response → `CartState` (amounts in the store currency, calculated by the server) */
 declare function cartStateFromServer(cart: ServerCartResponse, fallbackCurrency?: string): CartState;
-/** Storefront sepeti (#434): `/cart.js` ve `/cart/*.js` uçları; fiyat gönderilmez */
+/** Storefront cart (#434): `/cart.js` and `/cart/*.js` endpoints; no price is sent */
 declare class ServerCartBackend implements CartBackend {
     private client;
     private storeCurrency;
@@ -497,25 +497,25 @@ declare class CartModule {
     private backend;
     private dom;
     constructor(http: HttpClient, events: EventEmitter, options?: PaymentsModuleOptions, deps?: CartModuleDeps);
-    /** Sepet sunucuda mı (storefront sepet uçları) */
+    /** Whether the cart lives on the server (storefront cart endpoints) */
     get isServerBacked(): boolean;
-    /** Sepetin güncel hali */
+    /** Current state of the cart */
     get(): Promise<CartState>;
-    /** Ürünü ekler; sepette varsa adedi artar. `crafter:cart:updated` yayar. */
+    /** Adds the product; if it is already in the cart the quantity increases. Emits `crafter:cart:updated`. */
     add(product: CartAddInput, quantity?: number): Promise<CartState>;
-    /** Satırın adedini ayarlar; 0 ya da altı satırı siler */
+    /** Sets the line's quantity; 0 or less removes the line */
     update(id: string | number, quantity: number): Promise<CartState>;
     remove(id: string | number): Promise<CartState>;
-    /** Sepeti ve kuponu boşaltır */
+    /** Empties the cart and the coupon */
     clear(): Promise<CartState>;
     /**
-     * Kuponu uygular; null / boş kaldırır. Storefront sepetinde sunucu hemen doğrular (#476): geçerliyse `discount`,
-     * `total`, `couponDetails` dolu döner; geçersizse `CrafterCouponError` (HTTP 422; `type`: `CouponErrorType`,
-     * `message` sayfanın dilinde, `details.minCartValue`) fırlatılır, sepet değişmez ve `crafter:cart:updated` yayılmaz.
-     * localStorage sepeti kuponu doğrulayamaz: kodu saklar, indirimi checkout hesaplar.
+     * Applies the coupon; null / empty removes it. In the storefront cart the server validates it right away (#476): if valid,
+     * `discount`, `total` and `couponDetails` are returned filled; if invalid a `CrafterCouponError` (HTTP 422; `type`: `CouponErrorType`,
+     * `message` in the page language, `details.minCartValue`) is thrown, the cart does not change and `crafter:cart:updated` is not emitted.
+     * The localStorage cart cannot validate coupons: it stores the code and checkout calculates the discount.
      */
     setCoupon(code: string | null): Promise<CartState>;
-    /** Kuponu kaldırır (`setCoupon(null)`) */
+    /** Removes the coupon (`setCoupon(null)`) */
     removeCoupon(): Promise<CartState>;
     private emit;
     /**
@@ -526,17 +526,17 @@ declare class CartModule {
     /**
      * Pay the cart at a provider. The charged amount is the storefront total.
      * Balance is not credited and the top-up multiplier is not applied.
-     * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi kırılımı) bulunur.
-     * Stok yetersizse `CrafterOutOfStockError` (HTTP 409, `productIds`) fırlatılır.
-     * Para birimini sunucu belirler; `currency` verilmezse gönderilmez. `{ useCustomerCurrency: true }` ile önce kilitli
-     * kur teklifi alınır ve ödeme müşteri para biriminde başlatılır (bkz. `payWithQuote`).
+     * When the seller is an LLC with CrafterPayments, the response includes `stripe` (clientSecret, publishableKey, tax breakdown).
+     * If stock is insufficient a `CrafterOutOfStockError` (HTTP 409, `productIds`) is thrown.
+     * The server decides the currency; if `currency` is not given it is not sent. With `{ useCustomerCurrency: true }` a locked
+     * rate quote is fetched first and payment starts in the customer currency (see `payWithQuote`).
      * POST /payment/checkout
      */
     checkout(data: PurchaseDto & {
         providerId: string;
         websiteId: string;
         provider?: string;
-        /** Yalnızca teklifin para birimi (`quoteId` ile); verilmezse sunucu mağaza para birimini kullanır */
+        /** Only the quote's currency (with `quoteId`); if not given the server uses the store currency */
         currency?: string;
         /** Kilitli kur teklifi (`payments.quote`) */
         quoteId?: string;
@@ -547,9 +547,9 @@ declare class CartModule {
             phone?: string;
             address?: string;
         };
-        /** Alıcının ülkesi (ISO 3166-1 alpha-2); satıcı LLC iken Stripe Tax vergi konumu */
+        /** Buyer's country (ISO 3166-1 alpha-2); the Stripe Tax location when the seller is an LLC */
         billingCountry?: string;
-        /** ABD / Kanada için posta kodu (Stripe Tax) */
+        /** Postal code for the US / Canada (Stripe Tax) */
         billingPostalCode?: string;
     }, options?: {
         legalTerms?: LegalTermsConsent;
@@ -558,45 +558,45 @@ declare class CartModule {
 }
 
 /**
- * Sayfa bağlamı (#447): storefront her v2 tema sayfasına `content_for_header` ile
- * `window.__CRAFTER_CONTEXT__` yazar. Gizli bilgi ve kişisel veri içermez; yalnızca mağaza, dil ve para birimi.
- * IIFE derlemesi bu nesneyi görünce `window.Crafter` örneğini kendiliğinden kurar (bkz. `autoInit`).
+ * Page context (#447): the storefront writes `window.__CRAFTER_CONTEXT__` into every v2 theme page with
+ * `content_for_header`. It holds no secrets or personal data; only the store, language and currency.
+ * When the IIFE build sees this object it sets up the `window.Crafter` instance by itself (see `autoInit`).
  */
 interface CrafterPageContext {
-    /** Bağlamı yazan storefront'un eklediği SDK sürümü */
+    /** SDK version added by the storefront that wrote the context */
     sdkVersion?: string;
     websiteId?: string;
-    /** Aynı kökenli proxy; varsayılan '/api/storefront' */
+    /** Same-origin proxy; default '/api/storefront' */
     apiBase?: string;
-    /** Sayfanın dili (ör. 'en', 'pt-BR') */
+    /** Page language (e.g. 'en', 'pt-BR') */
     locale?: string;
-    /** Mağazanın varsayılan dili */
+    /** The store's default language */
     defaultLocale?: string;
-    /** Sayfa adresinin dil öneki: varsayılan dilde '', diğerlerinde '/en' */
+    /** Language prefix of the page URL: '' for the default language, '/en' for the others */
     localePrefix?: string;
-    /** Mağazanın açık dilleri */
+    /** The store's enabled languages */
     languages?: string[];
-    /** Mağaza para birimi (muhasebe birimi); tutarlar bu birimde tutulur */
+    /** Store currency (accounting unit); amounts are kept in this unit */
     storeCurrency?: string;
-    /** Müşterinin para birimi; yoksa mağaza para birimi */
+    /** The customer's currency; the store currency if absent */
     customerCurrency?: string;
-    /** 1 mağaza birimi = rate müşteri birimi (yalnızca gösterim) */
+    /** 1 store unit = rate customer units (display only) */
     rate?: number;
-    /** Seçicideki para birimleri */
+    /** Currencies in the selector */
     currencies?: string[];
-    /** Platform adresleri; checkout dil önekiyle çalışmaz, dili Referer'dan okur */
+    /** Platform URLs; checkout does not use the language prefix, it reads the language from the Referer */
     routes?: {
         cart?: string;
         checkout?: string;
         localization?: string;
-        /** Storefront sepet uçlarının kökü (#434), ör. '/cart' → `/cart.js`, `/cart/add.js`. Yoksa sepet localStorage'da. */
+        /** Root of the storefront cart endpoints (#434), e.g. '/cart' → `/cart.js`, `/cart/add.js`. If absent the cart lives in localStorage. */
         cartApi?: string;
     };
 }
 declare const CONTEXT_GLOBAL = "__CRAFTER_CONTEXT__";
-/** `window.__CRAFTER_CONTEXT__` okunur; yoksa ya da nesne değilse null */
+/** Reads `window.__CRAFTER_CONTEXT__`; null if missing or not an object */
 declare function readPageContext(win?: any): CrafterPageContext | null;
-/** Dil önekini yoldan çıkarır: '/en/cart' → '/cart' (önek '/en' iken) */
+/** Strips the language prefix from the path: '/en/cart' → '/cart' (when the prefix is '/en') */
 declare function stripLocalePrefix(pathname: string, prefix: string | undefined): string;
 
 interface CrafterConfig {
@@ -637,13 +637,13 @@ interface CrafterConfig {
      */
     onTokenChange?: (token: string | null) => void;
     /**
-     * Stripe publishable key (pk_test_... / pk_live_...). Satıcı LLC iken Payment Element için kullanılır.
-     * Backend ödeme yanıtında anahtar döndürürse o önceliklidir. Gizli değildir.
+     * Stripe publishable key (pk_test_... / pk_live_...). Used for the Payment Element when the seller is an LLC.
+     * If the backend returns a key in the payment response, that one takes precedence. Not secret.
      */
     stripePublishableKey?: string;
     /**
-     * Sayfa bağlamı (#447): storefront'un `window.__CRAFTER_CONTEXT__` nesnesi. Para gösterimi, dil seçimi ve
-     * checkout adresi buradan okunur. Tema sayfalarında SDK kendiliğinden verir.
+     * Page context (#447): the storefront's `window.__CRAFTER_CONTEXT__` object. Money display, language choice and the
+     * checkout URL are read from it. On theme pages the SDK provides it by itself.
      */
     context?: CrafterPageContext;
 }
@@ -655,7 +655,7 @@ interface CrafterApiError {
     statusCode: number;
     message: string | string[];
     error?: string;
-    /** Backend hata kodu (ErrorType), ör. 'out_of_stock' */
+    /** Backend error code (ErrorType), e.g. 'out_of_stock' */
     type?: string;
     details?: Record<string, any>;
 }
@@ -1091,77 +1091,77 @@ interface InitiatePaymentDto {
     amount: number;
     providerId: string;
     /**
-     * Para birimini sunucu belirler (mağaza para birimi). Yalnızca kilitli teklifin (`quoteId`) para birimi
-     * gönderilebilir; başka bir değer 400 `payment_currency_mismatch` döner. Verilmezse alan gönderilmez.
+     * The server decides the currency (the store currency). Only the locked quote's (`quoteId`) currency
+     * may be sent; any other value returns 400 `payment_currency_mismatch`. If not given the field is not sent.
      */
     currency?: string;
-    /** Kilitli kur teklifi (`payments.quote`); verilmezse ödeme mağaza para biriminde */
+    /** Locked rate quote (`payments.quote`); if not given, payment is in the store currency */
     quoteId?: string;
     websiteId?: string;
     user: InitiatePaymentUser;
-    /** Alıcının ülkesi (ISO 3166-1 alpha-2); satıcı LLC iken Stripe Tax vergi konumu */
+    /** Buyer's country (ISO 3166-1 alpha-2); the Stripe Tax location when the seller is an LLC */
     billingCountry?: string;
-    /** ABD / Kanada için posta kodu (Stripe Tax) */
+    /** Postal code for the US / Canada (Stripe Tax) */
     billingPostalCode?: string;
     [key: string]: any;
 }
-/** Backend'in ödeme başlatma yanıt türü. `stripe`: satıcı LLC + CrafterPayments (Payment Element). */
+/** Backend payment initiation response type. `stripe`: seller LLC + CrafterPayments (Payment Element). */
 type PaymentSessionType = 'iframe' | 'redirect' | 'kuveytturk_init' | 'stripe' | (string & {});
-/** Stripe Tax vergi satırı (ülke / eyalet, vergi türü, oran ve tutar). */
+/** Stripe Tax line (country / state, tax type, rate and amount). */
 interface PaymentTaxLine {
     country: string | null;
     state: string | null;
     /** 'vat' | 'sales_tax' | 'gst' | 'hst' | 'pst' | 'qst' ... */
     taxType: string | null;
-    /** Yüzde olarak oran (ör. 19 = %19) */
+    /** Rate as a percentage (e.g. 19 = 19%) */
     rate: number;
     amount: number;
 }
-/** Vergi kırılımı ve toplam (yalnızca backend `subtotal` döndürdüğünde, yani Stripe Tax hesaplandığında). */
+/** Tax breakdown and total (only when the backend returns `subtotal`, i.e. when Stripe Tax was calculated). */
 interface PaymentTaxBreakdown {
-    /** Vergi hariç tutar */
+    /** Amount excluding tax */
     subtotal: number;
-    /** Toplam vergi */
+    /** Total tax */
     taxAmount: number;
-    /** Tahsil edilecek toplam (vergi dahil) */
+    /** Total to charge (including tax) */
     total: number;
     currency: string;
     lines: PaymentTaxLine[];
 }
 /**
- * Satıcı LLC iken CrafterPayments ödemesi: Stripe Payment Element ile sayfa içinde tamamlanır.
- * Stripe.js SDK'ya gömülü değildir; tema geliştiricisi kendisi yükler (bkz. wiki/07-payments.md).
+ * CrafterPayments payment when the seller is an LLC: completed on the page with the Stripe Payment Element.
+ * Stripe.js is not bundled in the SDK; the theme developer loads it (see wiki/07-payments.md).
  */
 interface StripePaymentSession {
     paymentId: string;
-    /** PaymentIntent client secret'ı: `stripe.elements({ clientSecret })` */
+    /** PaymentIntent client secret: `stripe.elements({ clientSecret })` */
     clientSecret: string;
     /**
-     * Stripe publishable key. Backend yanıtında varsa oradan, yoksa `CrafterConfig.stripePublishableKey`'den gelir.
-     * İkisi de yoksa null'dır (tema kendi anahtarını kullanmalı).
+     * Stripe publishable key. From the backend response if present, otherwise from `CrafterConfig.stripePublishableKey`.
+     * null if neither exists (the theme must use its own key).
      */
     publishableKey: string | null;
-    /** Tahsil edilecek toplam (vergi dahil) */
+    /** Total to charge (including tax) */
     amount: number;
     currency: string;
     merchantOid?: string;
-    /** Stripe Tax kırılımı; backend vergi bilgisi döndürmediyse null */
+    /** Stripe Tax breakdown; null if the backend returned no tax info */
     tax: PaymentTaxBreakdown | null;
-    /** Müşteri para biriminde ödemede mağaza tutarı ve kur; mağaza para biriminde ödemede yok */
+    /** Store amount and rate for a payment in the customer currency; absent for a payment in the store currency */
     presentment?: PaymentPresentment;
 }
-/** Kur teklifi türü: sepet ödemesi ya da bakiye yükleme */
+/** Rate quote kind: cart payment or balance top-up */
 type PresentmentQuoteKind = 'cart' | 'top_up';
-/** `POST /payment/quote` gövdesi */
+/** `POST /payment/quote` body */
 interface PresentmentQuoteRequest {
     /** Verilmezse `CrafterConfig.websiteId` */
     websiteId?: string;
     kind: PresentmentQuoteKind;
-    /** Müşterinin seçtiği para birimi (öneri); sunucu ayara ve ülkeye göre belirler */
+    /** Currency chosen by the customer (a suggestion); the server decides by settings and country */
     currency?: string;
-    /** kind = top_up: yükleme tutarı (mağaza para biriminde) */
+    /** kind = top_up: top-up amount (in the store currency) */
     amount?: number;
-    /** kind = cart: `cart.checkout` ile aynı sepet alanları */
+    /** kind = cart: the same cart fields as `cart.checkout` */
     coupon?: string;
     productIds?: string[];
     items?: {
@@ -1170,16 +1170,16 @@ interface PresentmentQuoteRequest {
     }[];
     quantities?: Record<string, number>;
 }
-/** Kilitli kur teklifi (~30 dk geçerli); ödeme `quoteId` ile başlatılır */
+/** Locked rate quote (valid ~30 min); payment starts with `quoteId` */
 interface PresentmentQuote {
     quoteId: string;
     kind: PresentmentQuoteKind;
     storeCurrency: string;
     storeAmount: number;
-    /** Müşterinin ödeyeceği para birimi ve tutar */
+    /** Currency and amount the customer will pay */
     currency: string;
     amount: number;
-    /** 1 mağaza birimi = rate müşteri birimi (kur payı dahil) */
+    /** 1 store unit = rate customer units (including the FX margin) */
     rate: number;
     baseRate?: number;
     markupPercent?: number;
@@ -1188,7 +1188,7 @@ interface PresentmentQuote {
     /** ISO tarih */
     expiresAt: string;
 }
-/** Ödeme yanıtındaki müşteri para birimi bilgisi (teklifle ödemede) */
+/** Customer currency info in the payment response (when paying with a quote) */
 interface PaymentPresentment {
     quoteId: string;
     currency: string;
@@ -1198,30 +1198,30 @@ interface PaymentPresentment {
     storeCurrency: string;
     storeAmount: number;
 }
-/** Müşteri para biriminin ayarı: otomatik, seçili para birimleri ya da kapalı */
+/** Customer currency setting: automatic, selected currencies or disabled */
 type CustomerCurrencyMode = 'auto' | 'selected' | 'off' | (string & {});
-/** Müşteri para birimi nasıl belirlendi: seçim (çerez / parametre), ülke ya da mağaza para birimi */
+/** How the customer currency was chosen: selection (cookie / parameter), country or store currency */
 type CustomerCurrencySource = 'choice' | 'country' | 'store' | (string & {});
-/** `GET /payment/currencies`: fiyat gösterimi ve para birimi seçicisi için bağlam */
+/** `GET /payment/currencies`: context for price display and the currency selector */
 interface CustomerCurrencyContext {
     storeCurrency: string;
     mode: CustomerCurrencyMode;
-    /** Mağaza para biriminden başka para birimi gösterilebiliyor mu */
+    /** Whether currencies other than the store currency can be shown */
     enabled: boolean;
-    /** Seçicideki para birimleri; mağaza para birimi ilk sırada */
+    /** Currencies in the selector; the store currency comes first */
     currencies: string[];
-    /** Müşterinin para birimi */
+    /** The customer's currency */
     currency: string;
     source: CustomerCurrencySource;
-    /** 1 mağaza birimi = rate müşteri birimi (kur payı dahil) */
+    /** 1 store unit = rate customer units (including the FX margin) */
     rate: number;
-    /** İzinli para birimlerinin kurları (seçicide anında çeviri için) */
+    /** Rates of the allowed currencies (for instant conversion in the selector) */
     rates: Record<string, number>;
     markupPercent: number;
     rateDate: string | null;
     rateSource: string | null;
 }
-/** `POST /payment/currencies/convert`: tutarlar istek sırasıyla müşteri para biriminde */
+/** `POST /payment/currencies/convert`: amounts in the customer currency, in request order */
 interface CurrencyConversion {
     storeCurrency: string;
     currency: string;
@@ -1232,13 +1232,13 @@ interface CurrencyConversion {
     amounts: number[];
 }
 /**
- * Müşteri para biriminde ödeme (isteğe bağlı): önce kilitli teklif alınır, ödeme `quoteId` ile başlatılır.
- * Teklifin süresi dolduysa / sepet değiştiyse bir kez yeni teklif alınır; mağaza müşteri para birimini
- * kapattıysa (`customer_currency_not_allowed`) ödeme mağaza para biriminde başlatılır.
+ * Payment in the customer currency (optional): a locked quote is fetched first, payment starts with `quoteId`.
+ * If the quote expired / the cart changed, a new quote is fetched once; if the store disabled the customer
+ * currency (`customer_currency_not_allowed`), payment starts in the store currency.
  */
 interface CustomerCurrencyOptions {
     useCustomerCurrency?: boolean;
-    /** Teklif için para birimi önerisi; verilmezse sunucu çerezden / ülkeden belirler */
+    /** Currency suggestion for the quote; if not given the server decides from the cookie / country */
     customerCurrency?: string;
 }
 interface InitiatePaymentResponse {
@@ -1248,7 +1248,7 @@ interface InitiatePaymentResponse {
     paymentUrl?: string;
     success?: boolean;
     type?: PaymentSessionType;
-    /** Backend'in ham alanı; SDK ayrıca `paymentId` olarak da döndürür */
+    /** The backend's raw field; the SDK also returns it as `paymentId` */
     payment_id?: string;
     payment_url?: string;
     redirectUrl?: string;
@@ -1258,78 +1258,78 @@ interface InitiatePaymentResponse {
     merchant_oid?: string;
     amount?: number | string;
     currency?: string;
-    /** type = stripe: PaymentIntent client secret'ı */
+    /** type = stripe: PaymentIntent client secret */
     clientSecret?: string;
-    /** type = stripe: vergi hariç tutar, toplam vergi ve satırlar (ham alanlar) */
+    /** type = stripe: amount excluding tax, total tax and lines (raw fields) */
     subtotal?: number;
     taxAmount?: number;
     taxes?: PaymentTaxLine[];
-    /** Sepet bakiyeyle tamamen ödendiyse ürünler teslim edilmiştir; sağlayıcıya gidilmez */
+    /** If the cart was paid entirely with balance, the items have been delivered; no provider redirect */
     delivered?: boolean;
-    /** SDK tarafından eklenir: type = stripe ise Payment Element için gereken her şey, değilse yok */
+    /** Added by the SDK: everything needed for the Payment Element if type = stripe, absent otherwise */
     stripe?: StripePaymentSession;
-    /** SDK tarafından eklenir: vergi kırılımı (yoksa null) */
+    /** Added by the SDK: tax breakdown (null if absent) */
     tax?: PaymentTaxBreakdown | null;
     /**
-     * Teklifle (müşteri para biriminde) ödemede mağaza tutarı ve kur. Bu durumda `amount`, `currency`, `subtotal`,
-     * `taxAmount` ve `taxes` müşteri para birimindedir.
+     * Store amount and rate when paying with a quote (in the customer currency). In this case `amount`, `currency`, `subtotal`,
+     * `taxAmount` and `taxes` are in the customer currency.
      */
     presentment?: PaymentPresentment;
-    /** SDK tarafından eklenir (`useCustomerCurrency`): müşteri para birimi kapalı, ödeme mağaza para biriminde */
+    /** Added by the SDK (`useCustomerCurrency`): the customer currency is disabled, payment is in the store currency */
     customerCurrencyDisabled?: boolean;
     [key: string]: any;
 }
-/** Sepet ödemesi (`cart.checkout`) yanıtı; ödeme başlatma yanıtıyla aynı yapıdadır. */
+/** Cart payment (`cart.checkout`) response; same shape as the payment initiation response. */
 type CheckoutPaymentResponse = InitiatePaymentResponse;
-/** Backend ödeme kaydı durumu (public durum ucu). */
+/** Backend payment record status (public status endpoint). */
 type PaymentRecordStatus = 'PENDING' | 'COMPLETED' | 'FAILED' | 'CANCELED' | 'REFUNDED' | (string & {});
-/** Public durum ucunun döndürdüğü teslimat özeti; eski backend veya teslimatsız ödemede null. */
+/** Delivery summary returned by the public status endpoint; null for an old backend or a payment without delivery. */
 type PublicDeliveryState = 'pending' | 'delivered' | 'failed' | 'refunded' | null;
 /**
- * Teslimat durumu (backend `deliveryStatus` değerleriyle aynı adlar).
- * - NEEDS_REVIEW: ödeme alındı ama teslimat yapılamadı / incelemede; mağaza yetkilisi müdahale etmeli.
- * - REFUNDED: ürün tükendiği için teslim edilemedi ve ödeme otomatik iade edildi.
+ * Delivery status (same names as the backend's `deliveryStatus` values).
+ * - NEEDS_REVIEW: payment received but delivery failed / is under review; a store admin must step in.
+ * - REFUNDED: could not be delivered because the product sold out, and the payment was refunded automatically.
  */
 type PaymentDeliveryStatus = 'PENDING' | 'DELIVERED' | 'NEEDS_REVIEW' | 'REFUNDED';
-/** Ödeme sonrası alıcıya gösterilecek sonuç. */
+/** Result shown to the buyer after payment. */
 type PaymentOutcome = 'processing' | 'success' | 'pending' | 'failed' | 'refunded' | 'needs_review';
 interface PaymentStatusResult {
     paymentId: string;
     status: PaymentRecordStatus;
-    /** Backend'in ham teslimat özeti */
+    /** The backend's raw delivery summary */
     delivery: PublicDeliveryState;
-    /** Teslimat durumu; teslimat bilgisi yoksa null */
+    /** Delivery status; null if there is no delivery info */
     deliveryStatus: PaymentDeliveryStatus | null;
-    /** Ödeme + teslimat birleşik sonucu */
+    /** Combined payment + delivery result */
     outcome: PaymentOutcome;
-    /** Sonuç kesinleşti mi (yoklama durdurulabilir) */
+    /** Whether the result is final (polling can stop) */
     final: boolean;
 }
 interface WaitForPaymentOptions {
-    /** Deneme sayısı (varsayılan 20) */
+    /** Number of attempts (default 20) */
     attempts?: number;
-    /** Denemeler arası bekleme, ms (varsayılan 1500) */
+    /** Wait between attempts, ms (default 1500) */
     intervalMs?: number;
     signal?: AbortSignal;
 }
-/** Site bakiyesi yükleme koşulları: `GET /payment/balance-top-up/policy` */
+/** Site balance top-up conditions: `GET /payment/balance-top-up/policy` */
 interface BalanceTopUpPolicy {
-    /** Bakiye yükleme açık mı */
+    /** Whether balance top-up is enabled */
     enabled: boolean;
-    /** Satıcı LLC: kapalı devre bakiye kuralları ve limitler geçerli */
+    /** Seller LLC: closed-loop balance rules and limits apply */
     closedLoop: boolean;
-    /** SDK tarafından eklenir: yükleme ekranında bakiye koşul metni gösterilmeli mi (closedLoop ile aynı) */
+    /** Added by the SDK: whether the balance terms text should be shown on the top-up screen (same as closedLoop) */
     showTerms: boolean;
-    /** Mağaza para birimi */
+    /** Store currency */
     currency: string;
-    /** Tek yüklemede en fazla (USD) */
+    /** Maximum per top-up (USD) */
     maxSingleUsd: number;
-    /** Mağaza başına ödenmiş bakiye üst sınırı (USD) */
+    /** Paid balance cap per store (USD) */
     maxPaidUsd: number;
-    /** Mağaza para birimi karşılıkları; kur yoksa veya TR modunda null */
+    /** Store currency equivalents; null if there is no rate or in TR mode */
     maxSingleAmount: number | null;
     remainingAmount: number | null;
-    /** Toplam bakiye = ödenmiş + bonus */
+    /** Total balance = paid + bonus */
     balance: number;
     paidBalance: number;
     bonusBalance: number;
@@ -1646,9 +1646,9 @@ interface CrafterEventMap {
     'discord:unlinked': void;
     'cart:purchased': PurchaseResponse;
     'cart:checkout': CheckoutPaymentResponse;
-    /** Sepet değişti (ekle / güncelle / sil / başka sekme); `document`'ta `crafter:cart:updated` */
+    /** Cart changed (add / update / remove / another tab); `crafter:cart:updated` on `document` */
     'cart:updated': CartState;
-    /** Dil / para birimi seçildi; `document`'ta `crafter:localization:changed` */
+    /** Language / currency chosen; `crafter:localization:changed` on `document` */
     'localization:changed': {
         language: string;
         currency: string;
@@ -2470,9 +2470,9 @@ declare class LicensesModule {
 }
 
 /**
- * Müşteri para birimi (#424, #426): fiyat gösterimi için bağlam ve çeviri. Para birimini sunucu belirler
- * (vitrinin `crafter_currency` çerezi, ülke, mağaza para birimi); SDK kendi çerezini yazmaz.
- * Çevrilen tutarlar yalnızca gösterim içindir; ödeme tutarı kilitli teklifle (`payments.quote`) belirlenir.
+ * Customer currency (#424, #426): context and conversion for price display. The server decides the currency
+ * (the storefront's `crafter_currency` cookie, country, store currency); the SDK does not write its own cookie.
+ * Converted amounts are for display only; the payment amount is set by the locked quote (`payments.quote`).
  */
 declare class CurrenciesModule {
     private http;
@@ -2480,8 +2480,8 @@ declare class CurrenciesModule {
     private options;
     constructor(http: HttpClient, events: EventEmitter, options?: Pick<CrafterConfig, 'websiteId'>);
     /**
-     * Mağaza para birimi, izinli para birimleri, müşterinin para birimi ve kurlar.
-     * `currency`: müşterinin seçimi (öneri); izinli değilse ülke / mağaza para birimi döner.
+     * Store currency, allowed currencies, the customer's currency and rates.
+     * `currency`: the customer's choice (a suggestion); if not allowed, the country / store currency is returned.
      * GET /payment/currencies?websiteId=&currency=
      */
     context(params?: {
@@ -2489,7 +2489,7 @@ declare class CurrenciesModule {
         websiteId?: string;
     }): Promise<CustomerCurrencyContext>;
     /**
-     * Mağaza para birimindeki tutarları (en fazla 500) müşteri para birimine çevirir; sıra korunur.
+     * Converts store-currency amounts (at most 500) to the customer currency; order is preserved.
      * POST /payment/currencies/convert
      */
     convert(amounts: number[], params?: {
@@ -2500,45 +2500,45 @@ declare class CurrenciesModule {
 
 interface MoneyFormatOptions {
     /**
-     * Tutar mağaza para birimindeyse (varsayılan) sayfa bağlamının kuruyla müşterinin para birimine çevrilir.
-     * `false`: çevrilmez, mağaza para biriminde basılır (bakiye, hakediş gibi).
+     * If the amount is in the store currency (default) it is converted to the customer's currency with the page context's rate.
+     * `false`: not converted, printed in the store currency (balance, earnings, etc.).
      */
     convert?: boolean;
-    /** Tutar zaten bu para birimindeyse (ör. ödeme teklifi) verilir; çeviri yapılmaz */
+    /** Given if the amount is already in this currency (e.g. a payment quote); no conversion is done */
     currency?: string;
-    /** Varsayılan: sayfanın dili */
+    /** Default: the page language */
     locale?: string;
 }
-/** Para biriminin ondalık hanesi (Intl); bilinmeyen kodda 2 */
+/** Decimals of the currency (Intl); 2 for an unknown code */
 declare function currencyDigits(currency: string): number;
 /**
- * Para gösterimi (#447): storefront'un `money` filtresiyle aynı kural. Tutarlar mağaza para biriminde gelir;
- * sayfa bağlamındaki kurla müşterinin para birimine çevrilip sayfanın dilinde biçimlenir. Bağlam yoksa ya da
- * kur geçersizse mağaza para biriminde gösterilir. Yalnızca gösterimdir; kesin tutar ödeme anında sunucuda belirlenir.
+ * Money display (#447): same rule as the storefront's `money` filter. Amounts arrive in the store currency;
+ * they are converted to the customer's currency with the page context's rate and formatted in the page language. Without a context, or
+ * with an invalid rate, they are shown in the store currency. Display only; the exact amount is set on the server at payment time.
  */
 declare class MoneyModule {
     private getContext;
     constructor(getContext: () => CrafterPageContext | null);
-    /** Mağaza para birimi; bağlam yoksa boş */
+    /** Store currency; empty without a context */
     get storeCurrency(): string;
-    /** Müşterinin para birimi; kur geçersizse mağaza para birimi */
+    /** The customer's currency; the store currency if the rate is invalid */
     get currency(): string;
-    /** 1 mağaza birimi = rate müşteri birimi; müşteri para birimi mağazanınkiyse 1 */
+    /** 1 store unit = rate customer units; 1 if the customer currency is the store's */
     get rate(): number;
-    /** Mağaza tutarını müşteri para birimine çevirir ve o birimin hanesine yuvarlar */
+    /** Converts a store amount to the customer currency and rounds to that unit's decimals */
     convert(storeAmount: number | string): number;
     /**
-     * @example Crafter.money.format(19.99)                    // '€18,40' (EUR müşteri, de)
-     * @example Crafter.money.format(250, { convert: false })  // mağaza para biriminde
+     * @example Crafter.money.format(19.99)                    // '€18,40' (EUR customer, de)
+     * @example Crafter.money.format(250, { convert: false })  // in the store currency
      */
     format(amount: number | string, options?: MoneyFormatOptions): string;
     private rateOf;
 }
 
 interface LocalizationState {
-    /** Sayfanın dili */
+    /** Page language */
     language: string;
-    /** Müşterinin para birimi; yoksa mağaza para birimi */
+    /** The customer's currency; the store currency if absent */
     currency: string;
     languages: string[];
     currencies: string[];
@@ -2548,14 +2548,14 @@ interface LocalizationChange {
     currency?: string;
 }
 interface LocalizationSetOptions {
-    /** Seçimden sonra dönülecek uygulama içi yol (öneksiz); varsayılan bulunulan sayfa */
+    /** In-app path to return to after the choice (without prefix); defaults to the current page */
     returnTo?: string;
-    /** false: sayfa yenilenmez, yalnızca adres döner (tema kendisi yönetir). Varsayılan true. */
+    /** false: the page is not reloaded, only the URL is returned (the theme handles it). Default true. */
     reload?: boolean;
 }
 /**
- * Dil ve para birimi (#447). Seçim storefront'un JS'siz formuyla aynı uca gider: `POST /localization`
- * (`language`, `currency`, `return_to`). Sunucu seçimi çereze yazar ve sayfanın seçilen dildeki adresini verir.
+ * Language and currency (#447). The choice goes to the same endpoint as the storefront's no-JS form: `POST /localization`
+ * (`language`, `currency`, `return_to`). The server writes the choice to a cookie and returns the page URL in the chosen language.
  */
 declare class LocalizationModule {
     private getContext;
@@ -2563,8 +2563,8 @@ declare class LocalizationModule {
     constructor(getContext: () => CrafterPageContext | null, dom: DomEvents);
     get(): LocalizationState;
     /**
-     * Dili ve/veya para birimini değiştirir. Varsayılan olarak sayfa seçilen dildeki adrese gider.
-     * `crafter:localization:changed` olayı (`{ language, currency, url }`) gezinmeden önce yayılır.
+     * Changes the language and/or currency. By default the page navigates to the URL in the chosen language.
+     * The `crafter:localization:changed` event (`{ language, currency, url }`) is emitted before navigating.
      */
     set(change: LocalizationChange, options?: LocalizationSetOptions): Promise<{
         url: string;
@@ -2572,23 +2572,23 @@ declare class LocalizationModule {
 }
 
 interface SectionsRenderOptions {
-    /** Bölümlerin render edileceği sayfa; varsayılan bulunulan sayfa (yol + sorgu) */
+    /** Page to render the sections for; defaults to the current page (path + query) */
     url?: string;
-    /** false: DOM'a dokunulmaz, yalnızca HTML döner */
+    /** false: the DOM is not touched, only the HTML is returned */
     swap?: boolean;
 }
 /**
- * Bölüm render (#447): `?sections=a,b` ucundan bölümlerin güncel HTML'ini alır ve sayfadaki
- * `#crafter-section-<id>` sarmalayıcılarını yenisiyle değiştirir. Grup bölümleri `<grup>:<id>` ile istenir.
+ * Section rendering (#447): fetches the current HTML of the sections from the `?sections=a,b` endpoint and replaces the
+ * `#crafter-section-<id>` wrappers on the page with the new ones. Group sections are requested as `<group>:<id>`.
  */
 declare class SectionsModule {
     render(ids: string[], options?: SectionsRenderOptions): Promise<Record<string, string | null>>;
 }
 
 /**
- * Tutarı para birimi ve dile göre biçimlendirir (Intl.NumberFormat). Sembol ve ondalık hane para biriminden gelir;
- * 'TL' / '₺' sabit yazılmaz. `locale` verilmezse çalışma ortamının dili kullanılır.
- * Geçersiz para birimi / dil kodunda `1234.50 XYZ` biçimine düşer (hata fırlatmaz).
+ * Formats an amount by currency and language (Intl.NumberFormat). The symbol and decimals come from the currency;
+ * 'TL' / '₺' are never hard-coded. If `locale` is not given, the runtime's language is used.
+ * Falls back to `1234.50 XYZ` for an invalid currency / language code (never throws).
  *
  * @example formatMoney(9.99, 'USD', 'en-US') // '$9.99'
  * @example formatMoney(250, 'TRY', 'tr-TR')  // '₺250,00'
@@ -2738,7 +2738,7 @@ declare function toLexical(content: string | Record<string, any>): SerializedEdi
 declare class CrafterError extends Error {
     readonly statusCode: number;
     readonly error?: string;
-    /** Backend hata kodu (ErrorType), ör. 'out_of_stock', 'balance_top_up_limit_exceeded' */
+    /** Backend error code (ErrorType), e.g. 'out_of_stock', 'balance_top_up_limit_exceeded' */
     readonly type?: string;
     readonly details?: Record<string, any>;
     readonly isCrafterError = true;
@@ -2751,7 +2751,7 @@ declare class CrafterError extends Error {
     });
     static fromResponse(statusCode: number, data: any): CrafterError;
 }
-/** Ödeme akışıyla ilgili backend hata kodları (ErrorType). */
+/** Backend error codes (ErrorType) related to the payment flow. */
 declare const PaymentErrorType: {
     readonly OUT_OF_STOCK: "out_of_stock";
     readonly BALANCE_TOP_UP_UNAVAILABLE: "balance_top_up_unavailable";
@@ -2765,21 +2765,21 @@ declare const PaymentErrorType: {
     readonly PAYMENT_CONFIG_ERROR: "payment_config_error";
     readonly PAYMENT_INITIALIZATION_FAILED: "payment_initialization_failed";
     readonly PAYMENT_FAILED: "payment_failed";
-    /** İstemcinin gönderdiği para birimi mağazanınkinden (ya da teklifinkinden) farklı */
+    /** The currency sent by the client differs from the store's (or the quote's) */
     readonly PAYMENT_CURRENCY_MISMATCH: "payment_currency_mismatch";
-    /** Sağlayıcı / satıcı bu para birimini desteklemiyor */
+    /** The provider / seller does not support this currency */
     readonly PAYMENT_CURRENCY_UNSUPPORTED: "payment_currency_unsupported";
-    /** Mağaza müşteri para birimini kapattı: ödeme mağaza para biriminde */
+    /** The store disabled the customer currency: payment is in the store currency */
     readonly CUSTOMER_CURRENCY_NOT_ALLOWED: "customer_currency_not_allowed";
-    /** Teklif bulunamadı / süresi doldu / sepet değişti: yeni teklif alınır */
+    /** Quote not found / expired / cart changed: get a new quote */
     readonly PRESENTMENT_QUOTE_NOT_FOUND: "presentment_quote_not_found";
     readonly PRESENTMENT_QUOTE_EXPIRED: "presentment_quote_expired";
     readonly PRESENTMENT_QUOTE_MISMATCH: "presentment_quote_mismatch";
 };
 type PaymentErrorTypeValue = (typeof PaymentErrorType)[keyof typeof PaymentErrorType];
 /**
- * Kupon reddi (#476): `crafter.cart.setCoupon()` (storefront `POST /cart/coupon.js`, HTTP 422) ve kupon doğrulaması.
- * Sepet ayrıca `couponRemoved.reason` alanında aynı kodlarla bildirir (saklı kupon geçersizleşip düşürüldüyse).
+ * Coupon rejection (#476): `crafter.cart.setCoupon()` (storefront `POST /cart/coupon.js`, HTTP 422) and coupon validation.
+ * The cart also reports the same codes in `couponRemoved.reason` (when a stored coupon became invalid and was dropped).
  */
 declare const CouponErrorType: {
     readonly NOT_FOUND: "coupon_not_found";
@@ -2787,31 +2787,31 @@ declare const CouponErrorType: {
     readonly USAGE_LIMIT_REACHED: "coupon_usage_limit_reached";
     readonly ALREADY_USED_BY_USER: "coupon_already_used_by_user";
     readonly NOT_ASSIGNED_TO_USER: "coupon_not_assigned_to_user";
-    /** Sepet tutarı kuponun alt sınırının altında (`details.minCartValue`, mağaza para biriminde) */
+    /** Cart total is below the coupon's minimum (`details.minCartValue`, in the store currency) */
     readonly CART_TOTAL_BELOW_MINIMUM: "coupon_cart_total_below_minimum";
     readonly INVALID_FOR_PRODUCT: "coupon_invalid_for_product";
     readonly INVALID_TYPE: "coupon_invalid_type";
 };
 type CouponErrorTypeValue = (typeof CouponErrorType)[keyof typeof CouponErrorType];
-/** Kupon hata kodlarının listesi */
+/** List of coupon error codes */
 declare const COUPON_ERROR_TYPES: string[];
 type ErrorPayload = ConstructorParameters<typeof CrafterError>[0];
 /**
- * Kupon reddedildi (#476). `message` sayfanın dilinde, doğrudan gösterilebilir; `type` için `CouponErrorType`.
- * Reddedilen kupon sepete yazılmaz, sepet değişmez.
+ * Coupon rejected (#476). `message` is in the page language and can be shown as is; see `CouponErrorType` for `type`.
+ * A rejected coupon is not written to the cart and the cart does not change.
  */
 declare class CrafterCouponError extends CrafterError {
-    /** `coupon_cart_total_below_minimum` ise kuponun alt sınırı (`details.minCartValue`); yoksa null */
+    /** The coupon's minimum (`details.minCartValue`) for `coupon_cart_total_below_minimum`; null otherwise */
     readonly minCartValue: number | null;
     constructor(payload: ErrorPayload);
 }
-/** Stok ödeme başlatılırken yetersiz çıktı (HTTP 409, `out_of_stock`). */
+/** Stock turned out to be insufficient when starting payment (HTTP 409, `out_of_stock`). */
 declare class CrafterOutOfStockError extends CrafterError {
-    /** Tükenen ürünlerin kimlikleri (`details.productIds`); backend göndermediyse boş */
+    /** IDs of the sold-out products (`details.productIds`); empty if the backend did not send them */
     readonly productIds: string[];
     constructor(payload: ErrorPayload);
 }
-/** Bakiye yükleme limit bilgisi (hata `details` alanından). */
+/** Balance top-up limit info (from the error's `details` field). */
 interface BalanceTopUpLimits {
     currency?: string;
     maxSingleUsd?: number;
@@ -2819,39 +2819,39 @@ interface BalanceTopUpLimits {
     maxSingleAmount?: number | null;
     remainingAmount?: number | null;
 }
-/** Bakiye yüklemesi reddedildi: kapalı, tek yükleme limiti veya toplam ödenmiş bakiye limiti aşıldı. */
+/** Balance top-up rejected: disabled, single top-up limit or total paid balance limit exceeded. */
 declare class CrafterBalanceTopUpError extends CrafterError {
     readonly reason: 'unavailable' | 'single_limit' | 'total_limit';
-    /** Limit hatalarında backend'in döndürdüğü limitler; `unavailable` için null */
+    /** Limits returned by the backend for limit errors; null for `unavailable` */
     readonly limits: BalanceTopUpLimits | null;
     constructor(payload: ErrorPayload);
 }
 /**
- * Ödeme sağlayıcısı / altyapı hatası: sağlayıcı bulunamadı, satıcı altyapısı hazır değil,
- * Stripe Tax vergi hesaplanamadı, ödeme başlatılamadı vb. `type` alanı ayrıntıyı verir.
+ * Payment provider / infrastructure error: provider not found, seller infrastructure not ready,
+ * Stripe Tax could not calculate tax, payment could not start, etc. The `type` field gives the detail.
  */
 declare class CrafterPaymentProviderError extends CrafterError {
-    /** Kullanıcı aynı bilgilerle biraz sonra tekrar deneyebilir mi */
+    /** Whether the user can retry with the same details a little later */
     readonly retryable: boolean;
     constructor(payload: ErrorPayload);
 }
 declare function isCrafterError(err: unknown): err is CrafterError;
 declare function isOutOfStockError(err: unknown): err is CrafterOutOfStockError;
 declare function isBalanceTopUpError(err: unknown): err is CrafterBalanceTopUpError;
-/** Kupon reddi mi (`CrafterCouponError` ya da kupon hata kodlu `CrafterError`) */
+/** Whether this is a coupon rejection (`CrafterCouponError` or a `CrafterError` with a coupon error code) */
 declare function isCouponError(err: unknown): err is CrafterCouponError;
 declare function isPaymentProviderError(err: unknown): err is CrafterPaymentProviderError;
 
-/** Paket sürümü; package.json ile aynı tutulur (test denetler) */
+/** Package version; kept in sync with package.json (checked by a test) */
 declare const SDK_VERSION = "1.5.2";
 
-/** `crafter.checkout()` seçenekleri */
+/** `crafter.checkout()` options */
 interface CheckoutNavigateOptions {
-    /** 'cart' (varsayılan): sepet ödemesi; 'balance': bakiye yükleme */
+    /** 'cart' (default): cart checkout; 'balance': balance top-up */
     purpose?: 'cart' | 'balance';
-    /** Bakiye yüklemede önerilen tutar (mağaza para biriminde) */
+    /** Suggested amount for a balance top-up (in the store currency) */
     amount?: number;
-    /** false: gezinmez, yalnızca adresi döner */
+    /** false: does not navigate, only returns the URL */
     navigate?: boolean;
 }
 declare class Crafter {
@@ -2860,9 +2860,9 @@ declare class Crafter {
     readonly config: CrafterConfig;
     readonly http: HttpClient;
     readonly events: EventEmitter;
-    /** `document` olayları: `crafter.dom.on('cart:updated', fn)` */
+    /** `document` events: `crafter.dom.on('cart:updated', fn)` */
     readonly dom: DomEvents;
-    /** Sayfa bağlamı (storefront'un yazdığı `window.__CRAFTER_CONTEXT__`); yoksa null */
+    /** Page context (`window.__CRAFTER_CONTEXT__` written by the storefront); null if absent */
     readonly context: CrafterPageContext | null;
     readonly money: MoneyModule;
     readonly localization: LocalizationModule;
@@ -2935,14 +2935,14 @@ declare class Crafter {
     };
     constructor(config?: CrafterConfig);
     /**
-     * Checkout sayfasına gider (#447). Sepet için `/checkout?purpose=cart`; checkout dil önekiyle açılmaz,
-     * dili gelinen sayfadan okur. Adres sayfa bağlamından (`routes.checkout`) gelir.
+     * Goes to the checkout page (#447). `/checkout?purpose=cart` for the cart; checkout does not open with the language prefix,
+     * it reads the language from the referring page. The URL comes from the page context (`routes.checkout`).
      */
     checkout(options?: CheckoutNavigateOptions): string;
     /**
-     * Tarayıcı derlemesinin (IIFE) otomatik başlatması (#447). Sayfada `window.__CRAFTER_CONTEXT__` varsa
-     * `window.Crafter` bu bağlamla kurulmuş örnek olur ve `document`'a `crafter:ready` yayılır; yoksa null döner
-     * (`window.Crafter` sınıf olarak kalır, `new Crafter({...})` eskisi gibi çalışır). İkinci çağrı aynı örneği döner.
+     * Auto-start of the browser build (IIFE) (#447). If the page has `window.__CRAFTER_CONTEXT__`,
+     * `window.Crafter` becomes an instance set up with that context and `crafter:ready` is dispatched on `document`; otherwise returns null
+     * (`window.Crafter` stays the class and `new Crafter({...})` works as before). A second call returns the same instance.
      */
     static autoInit(win?: any): Crafter | null;
     on<K extends keyof CrafterEventMap>(event: K, handler: EventHandler<CrafterEventMap[K]>): () => void;

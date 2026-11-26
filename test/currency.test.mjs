@@ -1,5 +1,5 @@
-// Müşteri para birimi birim testleri (#421, #424, #426). Derlenmiş paketi (dist) test eder: `npm test` önce build alır.
-// Sıfır bağımlılık: node:test + sahte fetch. Tüm değerler sentetiktir.
+// Customer currency unit tests (#421, #424, #426). Tests the built package (dist): `npm test` builds first.
+// Zero dependencies: node:test + fake fetch. All values are synthetic.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Crafter, CrafterError, formatMoney } from '../dist/index.mjs';
@@ -34,7 +34,7 @@ function direct() {
   return new Crafter({ mode: 'direct', websiteId: 'site-1', apiBase: 'https://api.test', token: 't' });
 }
 
-test('checkout ve initiate varsayılan para birimi göndermez; verilen değer aynen gider', async () => {
+test('checkout and initiate send no currency by default; a given value is passed as is', async () => {
   const crafter = direct();
   await crafter.cart.checkout(cart);
   await crafter.payments.initiate({ amount: 10, providerId: 'x', user: buyer });
@@ -46,7 +46,7 @@ test('checkout ve initiate varsayılan para birimi göndermez; verilen değer ay
   assert.equal(calls[2].body.quoteId, 'q-1');
 });
 
-test('payments.quote: /payment/quote, websiteId yapılandırmadan', async () => {
+test('payments.quote: /payment/quote, websiteId from the config', async () => {
   reply(200, quote('q-1'));
   const crafter = direct();
   const seen = [];
@@ -58,7 +58,7 @@ test('payments.quote: /payment/quote, websiteId yapılandırmadan', async () => 
   assert.deepEqual(seen, ['q-1']);
 });
 
-test('useCustomerCurrency: teklif alınır, ödeme quoteId ve teklifin para birimiyle başlar; presentment döner', async () => {
+test('useCustomerCurrency: a quote is fetched, payment starts with quoteId and the quote currency; presentment is returned', async () => {
   reply(200, quote('q-1'));
   reply(200, {
     success: true, type: 'stripe', payment_id: 'pay_1', clientSecret: 's', amount: 18.4, currency: 'EUR',
@@ -77,7 +77,7 @@ test('useCustomerCurrency: teklif alınır, ödeme quoteId ve teklifin para biri
   assert.equal(res.stripe.presentment.storeCurrency, 'USD');
 });
 
-test('useCustomerCurrency: süresi dolan teklif bir kez yenilenir', async () => {
+test('useCustomerCurrency: an expired quote is renewed once', async () => {
   reply(200, quote('q-1'));
   reply(409, { message: 'expired', type: 'presentment_quote_expired' });
   reply(200, quote('q-2'));
@@ -92,11 +92,11 @@ test('useCustomerCurrency: süresi dolan teklif bir kez yenilenir', async () => 
   assert.equal(res.paymentId, 'p');
 });
 
-test('useCustomerCurrency: ikinci teklif de reddedilirse hata fırlatılır (tek yenileme)', async () => {
+test('useCustomerCurrency: an error is thrown if the second quote is also rejected (single renewal)', async () => {
   reply(200, quote('q-1'));
-  reply(404, { message: 'yok', type: 'presentment_quote_not_found' });
+  reply(404, { message: 'missing', type: 'presentment_quote_not_found' });
   reply(200, quote('q-2'));
-  reply(409, { message: 'değişti', type: 'presentment_quote_mismatch' });
+  reply(409, { message: 'changed', type: 'presentment_quote_mismatch' });
   await assert.rejects(direct().cart.checkout(cart, { useCustomerCurrency: true }), (err) => {
     assert.ok(err instanceof CrafterError);
     assert.equal(err.type, 'presentment_quote_mismatch');
@@ -105,13 +105,13 @@ test('useCustomerCurrency: ikinci teklif de reddedilirse hata fırlatılır (tek
   assert.equal(calls.length, 4);
 });
 
-test('useCustomerCurrency: müşteri para birimi kapalıysa mağaza para biriminde teklifsiz ödenir', async () => {
-  // Teklif alınırken kapalı
-  reply(400, { message: 'kapalı', type: 'customer_currency_not_allowed' });
+test('useCustomerCurrency: if the customer currency is disabled, pays in the store currency without a quote', async () => {
+  // Disabled while fetching the quote
+  reply(400, { message: 'disabled', type: 'customer_currency_not_allowed' });
   reply(200, { success: true, type: 'iframe', payment_id: 'p1' });
-  // Ödeme başlatılırken kapalı
+  // Disabled while starting the payment
   reply(200, quote('q-1'));
-  reply(400, { message: 'kapalı', type: 'customer_currency_not_allowed' });
+  reply(400, { message: 'disabled', type: 'customer_currency_not_allowed' });
   reply(200, { success: true, type: 'iframe', payment_id: 'p2' });
   const crafter = direct();
   const first = await crafter.cart.checkout({ ...cart, currency: 'EUR' }, { useCustomerCurrency: true });
@@ -126,13 +126,13 @@ test('useCustomerCurrency: müşteri para birimi kapalıysa mağaza para birimin
   assert.equal('currency' in calls[4].body, false);
 });
 
-test('useCustomerCurrency: diğer teklif hataları yenilenmez', async () => {
+test('useCustomerCurrency: other quote errors are not renewed', async () => {
   reply(400, { message: 'para birimi', type: 'payment_currency_unsupported' });
   await assert.rejects(direct().cart.checkout(cart, { useCustomerCurrency: true }), (err) => err.type === 'payment_currency_unsupported');
   assert.equal(calls.length, 1);
 });
 
-test('currencies.context ve convert', async () => {
+test('currencies.context and convert', async () => {
   reply(200, {
     storeCurrency: 'USD', mode: 'auto', enabled: true, currencies: ['USD', 'EUR'], currency: 'EUR', source: 'country',
     rate: 0.92, rates: { EUR: 0.92 }, markupPercent: 2, rateDate: '2026-11-23', rateSource: 'ecb',
@@ -154,7 +154,7 @@ test('storefront modunda currencies.context websiteId olmadan proxy yoluna gider
   assert.equal(calls[0].url, '/api/storefront/payment/currencies');
 });
 
-test('formatMoney: Intl ile para birimi ve dile göre biçimlendirir', () => {
+test('formatMoney: formats by currency and language with Intl', () => {
   const plain = (s) => s.replace(/\s/g, ' ');
   assert.equal(formatMoney(1234.5, 'USD', 'en-US'), '$1,234.50');
   assert.equal(plain(formatMoney(1234.5, 'EUR', 'de-DE')), '1.234,50 €');

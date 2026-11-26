@@ -1,32 +1,32 @@
-# 🌐 Sunucular & Oy Verme (`crafter.servers` & `crafter.vote`)
+# 🌐 Servers & Voting (`crafter.servers` & `crafter.vote`)
 
-Bağlı Minecraft sunucularının anlık durumunu (online oyuncu sayısı, ping, IP) ve sunucu listelerindeki oy verme bağlantılarını yönetir.
+Handles the live status of connected Minecraft servers (online players, ping, IP) and the voting links on server lists.
 
 ---
 
-## 📌 Sunucu Durumu Modülü (`crafter.servers`)
+## 📌 Server Status Module (`crafter.servers`)
 
 ### 1. `getList()`
-Yöneticinin sisteme tanımladığı sunucuları ve anlık ping/oyuncu sayılarını getirir.
+Fetches the servers the admin defined in the system along with live ping/player counts.
 
-* **HTTP Rota:** `GET /config/servers`
-* **Dönüş:** `ServerStatusItem[]`
+* **HTTP Route:** `GET /config/servers`
+* **Returns:** `ServerStatusItem[]`
   ```typescript
   interface ServerStatusItem {
     id: string;
-    name: string;           // Örn: 'Survival 1.20', 'SkyBlock'
-    ip: string;             // Örn: 'oyna.sunucum.com'
+    name: string;           // e.g. 'Survival 1.20', 'SkyBlock'
+    ip: string;             // e.g. 'play.example.com'
     port: number;
     image?: string;
     isListed?: boolean;
     slug?: string;
-    onlinePlayers?: number; // Anlık çevrim içi oyuncu sayısı
-    maxPlayers?: number;    // Sunucu slot kapasitesi
-    isOnline?: boolean;     // Sunucu açık mı?
-    ping?: number;          // Gecikme süresi (ms)
+    onlinePlayers?: number; // Live online player count
+    maxPlayers?: number;    // Server slot capacity
+    isOnline?: boolean;     // Is the server up?
+    ping?: number;          // Latency (ms)
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   const servers = await crafter.servers.getList();
 
@@ -41,33 +41,33 @@ Yöneticinin sisteme tanımladığı sunucuları ve anlık ping/oyuncu sayılar�
 
 ---
 
-## 🗳️ Oy Verme Modülü (`crafter.vote`)
+## 🗳️ Voting Module (`crafter.vote`)
 
-Minecraft sunucu listelerinde (Minecraft-MP, TopG vb.) sunucuya oy veren oyuncuların ödül kazanmasını yönetir.
+Handles rewards for players who vote for the server on Minecraft server lists (Minecraft-MP, TopG, etc.).
 
 ### 2. `getProviders()`
-Aktif oy sitelerini ve bekleme sürelerini (cooldown) listeler.
+Lists the active vote sites and their cooldowns.
 
-* **HTTP Rota:** `GET /config/vote-providers`
-* **Dönüş:** `VoteProviderItem[]` (`id, name, url, cooldownHours, isActive`)
-* **Örnek:**
+* **HTTP Route:** `GET /config/vote-providers`
+* **Returns:** `VoteProviderItem[]` (`id, name, url, cooldownHours, isActive`)
+* **Example:**
   ```javascript
   const providers = await crafter.vote.getProviders();
   providers.forEach(p => {
-    console.log(`${p.name} - ${p.url} (Her ${p.cooldownHours} saatte bir)`);
+    console.log(`${p.name} - ${p.url} (every ${p.cooldownHours} hours)`);
   });
   ```
 
 ---
 
 ### 3. `vote(providerId, extraData?)`
-Oy verme isteğini işler ve kullanıcının bir sonraki oy verebileceği zamanı kaydeder.
+Processes the vote request and records when the user can vote next.
 
-* **HTTP Rota:** `POST /config/vote-providers/vote`
-* **Girdi:** `{ providerId: string }`
-* **Dönüş:** `{ success: true, message: string, canVoteAt?: string }`
-* **Örnek:**
+* **HTTP Route:** `POST /config/vote-providers/vote`
+* **Input:** `{ providerId: string }`
+* **Returns:** `{ success: true, message: string, canVoteAt?: string }`
+* **Example:**
   ```javascript
   const res = await crafter.vote.vote('provider-uuid');
-  console.log(`Oy kaydedildi! Bir sonraki oy: ${res.canVoteAt}`);
+  console.log(`Vote recorded! Next vote: ${res.canVoteAt}`);
   ```

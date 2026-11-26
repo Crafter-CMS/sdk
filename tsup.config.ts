@@ -25,7 +25,7 @@ export default defineConfig([
       };
     },
     footer: {
-      // Sayfa bağlamı (window.__CRAFTER_CONTEXT__) varsa window.Crafter hazır örnek olur (#447); yoksa sınıf kalır
+      // If a page context (window.__CRAFTER_CONTEXT__) exists, window.Crafter becomes a ready instance (#447); otherwise it stays the class
       js: `if (typeof window !== "undefined" && window.CrafterSDK) {
   window.Crafter = window.CrafterSDK.Crafter || window.CrafterSDK.default || window.CrafterSDK;
   if (window.CrafterSDK.Crafter && typeof window.CrafterSDK.Crafter.autoInit === "function") {

@@ -1,12 +1,12 @@
 {%- comment -%}
-  Örnek: tema v2 bölümü + Crafter SDK (SDK 1.5+).
-  Dosya: sections/mini-cart.liquid. Şablona JSON'dan eklenir ({ "type": "mini-cart" }) ya da editörden.
+  Example: a theme v2 section + the Crafter SDK (SDK 1.5+).
+  File: sections/mini-cart.liquid. Added to a template from JSON ({ "type": "mini-cart" }) or from the editor.
 
-  - SDK'yı storefront {{ content_for_header }} ile kendisi ekler; bölüm <script src> ya da new Crafter() yazmaz.
-  - İlk görünüm sunucuda Liquid `cart` nesnesiyle çizilir (JS gerekmez).
-  - Değişiklikler Crafter.cart ile yapılır, bölüm Crafter.sections.render ile yeniden çizilir.
-  - Metinler dil dosyasından (| t); tutarlar money filtresiyle; checkout bağlantısı purpose ile ve locale_url'siz.
-  Gereken anahtarlar (locales/tr.default.json): mini_cart.title, mini_cart.empty, mini_cart.remove,
+  - The storefront adds the SDK itself with {{ content_for_header }}; the section does not write <script src> or new Crafter().
+  - The first view is rendered on the server with the Liquid `cart` object (no JS needed).
+  - Changes are made with Crafter.cart, and the section is re-rendered with Crafter.sections.render.
+  - Texts come from the language file (| t); amounts use the money filter; the checkout link uses purpose and no locale_url.
+  Required keys (locales/en.default.json): mini_cart.title, mini_cart.empty, mini_cart.remove,
   mini_cart.checkout, mini_cart.coupon_placeholder, mini_cart.coupon_apply
 {%- endcomment -%}
 
@@ -58,7 +58,7 @@
         var button = event.target.closest('[data-remove]');
         if (!button || !root() || !root().contains(button)) return;
         button.disabled = true;
-        // Başarıda crafter:cart:updated yayılır ve bölüm aşağıda yeniden çizilir
+        // On success crafter:cart:updated is emitted and the section is re-rendered below
         Crafter.cart.remove(button.getAttribute('data-remove')).catch(function () { button.disabled = false; });
       });
 
@@ -74,9 +74,9 @@
         });
       });
 
-      // Sepet değişince (bu bölüm, başka bir bölüm ya da başka sekme) bölümü yeniden çiz
+      // When the cart changes (this section, another section or another tab), re-render the section
       document.addEventListener('crafter:cart:updated', rerender);
-      // Editör bölümü yeniden çizdiğinde dinleyiciler belge düzeyinde olduğu için yeniden bağlamak gerekmez
+      // When the editor re-renders the section, listeners do not need re-binding since they are at the document level
     });
   })();
 </script>

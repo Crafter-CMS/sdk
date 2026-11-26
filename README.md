@@ -4,106 +4,106 @@
 [![Bundle Size](https://img.shields.io/bundlephobia/min/@crafter-cms/sdk?style=flat-square)](https://bundlephobia.com/package/@crafter-cms/sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
-Crafter Storefront ve Headless web uygulamaları için resmi JavaScript / TypeScript istemci kütüphanesidir.
+The official JavaScript / TypeScript client library for Crafter Storefront and headless web applications.
 
-Crafter Liquid temalarındaki hardcoded `fetch()` isteklerini ortadan kaldırmak, API versiyonlamasını (`v2` vs düz rotalar) soyutlamak, çift çalışma modunu (Liquid Storefront Proxy vs Harici Doğrudan Backend) otomatik yönetmek ve reaktif bir arayüz deneyimi sunmak amacıyla sıfırdan geliştirilmiştir.
-
----
-
-## 📖 Kapsamlı Dokümantasyon (Wiki)
-
-Her modülün ayrıntılı parametreleri, dönüş modelleri ve tema kodlama örnekleri için [**📚 Wiki Rehberleri**](./wiki/README.md) dizinine göz atabilirsiniz:
-
-* 🔐 [**01. Kimlik Doğrulama (`crafter.auth`)**](./wiki/01-auth.md) — Giriş, Kayıt, Oyun içi (/web) Hızlı Giriş, 2FA, OTP, Şifre Sıfırlama, Discord
-* 👤 [**02. Kullanıcılar & Profil (`crafter.users`)**](./wiki/02-users.md) — Profil, Hafif Bakiye, Transfer, Duvar, 2FA Ayarları, Discord Bağlantısı
-* 🛒 [**03. Mağaza & Sepet (`crafter.store` & `cart`)**](./wiki/03-store-and-cart.md) — Kategoriler, Ürünler, Sepet Satın Alımı, Toplu İndirim
-* 📦 [**04. Oyuncu Sandığı (`crafter.chest`)**](./wiki/04-chest.md) — Web Envanteri, Eşya Kullanma ve Arkadaşa Hediye Etme
-* 🎫 [**05. Destek Talepleri (`crafter.tickets`)**](./wiki/05-tickets.md) — Talep Açma, Mesajlaşma, Departmanlar, Bilet Kapatma/Açma
-* 📰 [**06. Duyurular & Sayfalar (`posts` & `pages`)**](./wiki/06-posts-and-pages.md) — Haberler, Beğeniler, Kullanıcı Beğenileri, CMS Sayfaları
-* 💳 [**07. Ödeme İşlemleri (`crafter.payments`)**](./wiki/07-payments.md) — PayTR, Shopier, CrafterPayments, Ödeme Başlatma ve Sorgulama
-* 🎟️ [**08. Kuponlar & Kodlar (`coupons` & `redeemCode`)**](./wiki/08-coupons-and-redeem.md) — Sepet Kuponu Kontrolü, Promosyon ve Hediye Kartları
-* 📊 [**09. İstatistikler & Cezalar (`statistics` & `punishments`)**](./wiki/09-statistics-and-punishments.md) — Canlı Akış, Leaderboard, Ban/Mute Listesi ve Arama
-* 🌐 [**10. Sunucular & Oy Verme (`servers` & `vote`)**](./wiki/10-servers-and-vote.md) — Sunucu Ping/Oyuncu Sayısı, Oy Siteleri ve Bekleme Süreleri
-* 📜 [**11. Hukuki Belgeler & Şikayet (`legal` & `reports`)**](./wiki/11-legal-and-reports.md) — Kurallar, Gizlilik Politikası, Kural İhlali Şikayeti
-* 💬 [**12. Forum & Yardım Merkezi (`forum` & `helpcenter`)**](./wiki/12-forum-and-helpcenter.md) — Forum Konuları, Mesajlar, Beğeni, Bilgi Bankası Makaleleri
-* 📝 [**13. Yetkili Başvuru Formları (`staffForms`)**](./wiki/13-staff-forms.md) — Dinamik Soru Formları ve Başvuru Gönderme
-* 🔍 [**14. Arama, SEO, LuckPerms & Site Bilgisi**](./wiki/14-search-seo-luckperms-website.md) — Canlı Navbar Arama, SEO & Sitemap, Oyun İçi Rank
-* ⚡ [**15. Event Bus & Hata Yönetimi**](./wiki/15-events-and-errors.md) — Reaktif Olaylar (`crafter.on`), `CrafterError` ve Dual-Mode
-* ✍️ [**16. Lexical Zengin Metin Motoru (`crafter.utils`)**](./wiki/16-lexical-rich-text.md) — AST -> HTML/Text dönüştürücü ve Storefront Liquid filtresi eşleniği
-* 🧩 [**17. Tema v2 çalışma zamanı (`window.Crafter`)**](./wiki/17-theme-runtime.md) — `crafter:ready`, sunucu sepeti, para, dil, `sections.render`, checkout ve örnek bölüm
+Built from scratch to remove hardcoded `fetch()` calls from Crafter Liquid themes, abstract API versioning (`v2` vs plain routes), manage the dual operating mode (Liquid Storefront Proxy vs external direct backend) automatically and deliver a reactive UI experience.
 
 ---
 
-## 🌟 Çalışır Durumdaki Örnek Projeler ([`examples/`](./examples/README.md))
+## 📖 Full Documentation (Wiki)
 
-SDK'nın pratik entegrasyonlarını test etmek için hazır senaryolar:
-* [**`01-liquid-theme-demo.html`**](./examples/01-liquid-theme-demo.html) — Storefront Liquid temasında canlı arama, sunucu ping/online oyuncu, bakiye ile ürün satın alma ve `/web` hızlı giriş demosu.
-* [**`02-headless-node.ts`**](./examples/02-headless-node.ts) — Node.js / Headless modda doğrudan backend API çağrıları, LuckPerms ve SEO sitemap.
-* [**`03-lexical-showcase.html`**](./examples/03-lexical-showcase.html) — Tarayıcıda Lexical AST render ve HTML ➔ Lexical AST çift yönlü test sandbox'ı.
-* [**`04-tickets-and-forum.ts`**](./examples/04-tickets-and-forum.ts) — Destek talebi ve forum mesajlaşma iş akışları (otomatik Lexical dönüşümü).
-* [**`05-llc-checkout.html`**](./examples/05-llc-checkout.html) — Satıcı LLC sepet ödemesi (CrafterPayments), vergi kırılımı ve teslimat durumu.
-* [**`06-theme-v2-section.liquid`**](./examples/06-theme-v2-section.liquid) — Tema v2 bölümü: sunucuda çizilen mini sepet, `Crafter.cart`, `Crafter.sections.render`, kupon hatası ve checkout bağlantısı.
+See the [**📚 Wiki Guides**](./wiki/README.md) for each module's detailed parameters, return models and theme coding examples:
 
----
-
-## 🚀 Öne Çıkan Özellikler
-
-- **Sıfır Bağımlılık (Zero-dependency):** Harici hiçbir npm paketine ihtiyaç duymaz. Minified IIFE boyutu yalnızca ~18 KB (`dist/crafter.min.js`).
-- **Doğrudan Storefront Proxy Uyumu:** Varsayılan olarak `/api/storefront` üzerinden çalışır. Temada `websiteId` veya domain yapılandırması gerektirmez; mağaza hostname üzerinden çözülür.
-- **Kusursuz Versiyonlama:** Yalnızca `v2` olan endpointler `/v2/...` olarak çağrılır, diğer tüm endpointler düz yazılır (asla `v1` kullanılmaz).
-- **Her İki Dünyaya Uygun:**
-  - CDN / Script Tag ile Liquid temalarında: `window.Crafter`
-  - NPM / ESM modern bundler projelerinde: `import { Crafter } from '@crafter-cms/sdk'`
-- **Reaktif Event Sistemi:** Bakiye transferi, sepet satın alımı, sandık kullanımı ve oturum değişikliklerini anlık dinleme (`crafter.on('cart:purchased', ...)`).
-- **Tam Tip Güvenliği:** Backend NestJS DTO'larıyla %100 uyumlu TypeScript tanımları (`dist/index.d.ts`).
-- **Akıllı Otomasyonlar:**
-  - Şifre sıfırlamada `?token=` parametresini URL'den otomatik algılama.
-  - Oyun içi `/web` komutundan gelen güvenlik hash'i ile `crafter.auth.inGameAuth()` üzerinden tek tıkla şifresiz oturum açma.
+* 🔐 [**01. Authentication (`crafter.auth`)**](./wiki/01-auth.md) — Sign-in, sign-up, in-game (/web) quick login, 2FA, OTP, password reset, Discord
+* 👤 [**02. Users & Profile (`crafter.users`)**](./wiki/02-users.md) — Profile, lightweight balance, transfer, wall, 2FA settings, Discord link
+* 🛒 [**03. Store & Cart (`crafter.store` & `cart`)**](./wiki/03-store-and-cart.md) — Categories, products, cart purchase, bulk discount
+* 📦 [**04. Player Chest (`crafter.chest`)**](./wiki/04-chest.md) — Web inventory, using items and gifting them to friends
+* 🎫 [**05. Support Tickets (`crafter.tickets`)**](./wiki/05-tickets.md) — Opening tickets, messaging, departments, closing/reopening tickets
+* 📰 [**06. Posts & Pages (`posts` & `pages`)**](./wiki/06-posts-and-pages.md) — News, likes, user likes, CMS pages
+* 💳 [**07. Payments (`crafter.payments`)**](./wiki/07-payments.md) — PayTR, Shopier, CrafterPayments, starting and checking payments
+* 🎟️ [**08. Coupons & Codes (`coupons` & `redeemCode`)**](./wiki/08-coupons-and-redeem.md) — Cart coupon check, promotions and gift cards
+* 📊 [**09. Statistics & Punishments (`statistics` & `punishments`)**](./wiki/09-statistics-and-punishments.md) — Live feed, leaderboard, ban/mute list and search
+* 🌐 [**10. Servers & Voting (`servers` & `vote`)**](./wiki/10-servers-and-vote.md) — Server ping/player count, vote sites and cooldowns
+* 📜 [**11. Legal Documents & Reports (`legal` & `reports`)**](./wiki/11-legal-and-reports.md) — Rules, privacy policy, rule violation reports
+* 💬 [**12. Forum & Help Center (`forum` & `helpcenter`)**](./wiki/12-forum-and-helpcenter.md) — Forum topics, messages, likes, knowledge base articles
+* 📝 [**13. Staff Application Forms (`staffForms`)**](./wiki/13-staff-forms.md) — Dynamic question forms and submitting applications
+* 🔍 [**14. Search, SEO, LuckPerms & Site Info**](./wiki/14-search-seo-luckperms-website.md) — Live navbar search, SEO & sitemap, in-game rank
+* ⚡ [**15. Event Bus & Error Handling**](./wiki/15-events-and-errors.md) — Reactive events (`crafter.on`), `CrafterError` and dual mode
+* ✍️ [**16. Lexical Rich Text Engine (`crafter.utils`)**](./wiki/16-lexical-rich-text.md) — AST -> HTML/text converter and the counterpart of the Storefront Liquid filter
+* 🧩 [**17. Theme v2 runtime (`window.Crafter`)**](./wiki/17-theme-runtime.md) — `crafter:ready`, server cart, money, language, `sections.render`, checkout and a sample section
 
 ---
 
-## 📦 Kurulum & Kullanım
+## 🌟 Working Example Projects ([`examples/`](./examples/README.md))
 
-### 1. Liquid Temalarda (v2: SDK zorunlu, otomatik yüklenir)
+Ready-made scenarios for trying out the SDK's practical integrations:
+* [**`01-liquid-theme-demo.html`**](./examples/01-liquid-theme-demo.html) — Demo of live search, server ping/online players, buying a product with balance and `/web` quick login in a Storefront Liquid theme.
+* [**`02-headless-node.ts`**](./examples/02-headless-node.ts) — Direct backend API calls in Node.js / headless mode, LuckPerms and the SEO sitemap.
+* [**`03-lexical-showcase.html`**](./examples/03-lexical-showcase.html) — In-browser Lexical AST rendering and an HTML ➔ Lexical AST two-way test sandbox.
+* [**`04-tickets-and-forum.ts`**](./examples/04-tickets-and-forum.ts) — Support ticket and forum messaging workflows (automatic Lexical conversion).
+* [**`05-llc-checkout.html`**](./examples/05-llc-checkout.html) — Seller LLC cart payment (CrafterPayments), tax breakdown and delivery status.
+* [**`06-theme-v2-section.liquid`**](./examples/06-theme-v2-section.liquid) — Theme v2 section: a server-rendered mini cart, `Crafter.cart`, `Crafter.sections.render`, a coupon error and a checkout link.
 
-Tema v2 sayfalarında storefront SDK'yı `{{ content_for_header }}` ile **kendisi ekler** (sürümlü adres, `defer`) ve
-`window.__CRAFTER_CONTEXT__` (mağaza, dil, para birimi, kur) ile başlatır. Tema `<script src>` ya da `new Crafter()`
-yazmaz; `window.Crafter` hazır örnektir ve `document`'a `crafter:ready` yayılır. Temalar sepet, para, dil ve checkout
-kodunu kendisi yazmaz (`crafter theme check` bunu denetler):
+---
+
+## 🚀 Key Features
+
+- **Zero dependencies:** Needs no external npm packages. The minified IIFE is only ~18 KB (`dist/crafter.min.js`).
+- **Direct Storefront Proxy support:** Works through `/api/storefront` by default. The theme needs no `websiteId` or domain configuration; the store is resolved from the hostname.
+- **Clean versioning:** Only endpoints that exist solely as `v2` are called as `/v2/...`; all other endpoints are plain (`v1` is never used).
+- **Fits both worlds:**
+  - In Liquid themes via CDN / script tag: `window.Crafter`
+  - In NPM / ESM modern bundler projects: `import { Crafter } from '@crafter-cms/sdk'`
+- **Reactive event system:** Listen to balance transfers, cart purchases, chest usage and session changes in real time (`crafter.on('cart:purchased', ...)`).
+- **Full type safety:** TypeScript definitions 100% aligned with the backend NestJS DTOs (`dist/index.d.ts`).
+- **Smart automation:**
+  - Detects the `?token=` parameter in the URL automatically for password resets.
+  - One-click passwordless login with `crafter.auth.inGameAuth()` using the security hash from the in-game `/web` command.
+
+---
+
+## 📦 Installation & Usage
+
+### 1. In Liquid Themes (v2: SDK required, loaded automatically)
+
+On theme v2 pages the storefront **adds the SDK itself** with `{{ content_for_header }}` (versioned URL, `defer`) and
+initializes it with `window.__CRAFTER_CONTEXT__` (store, language, currency, rate). The theme does not write `<script src>` or
+`new Crafter()`; `window.Crafter` is a ready instance and `crafter:ready` is dispatched on `document`. Themes do not write their own
+cart, money, language or checkout code (`crafter theme check` enforces this):
 
 ```js
-// Sepet (#434): storefront'ta sunucuda (ziyaretçide imzalı çerez, girişte hesaba katılır); fiyatı sunucu hesaplar
+// Cart (#434): on the storefront it lives on the server (a signed cookie for visitors, merged into the account on login); the server calculates the price
 await Crafter.cart.add({ id }, 1);   // update(id, qty), remove(id), get(), clear()
 document.addEventListener('crafter:cart:updated', (e) => (badge.textContent = e.detail.itemCount));
 
-// Para: mağaza tutarı → müşterinin para birimi, sayfanın dilinde (Liquid `money` filtresiyle aynı)
+// Money: store amount → the customer's currency, in the page language (same as the Liquid `money` filter)
 Crafter.money.format(cart.subtotal);           // '€18,40'
 Crafter.money.format(balance, { convert: false });
 
-// Dil / para birimi: POST /localization, sayfa seçilen dildeki adrese gider
+// Language / currency: POST /localization, the page goes to the URL in the chosen language
 await Crafter.localization.set({ currency: 'EUR' });   // get() → { language, currency, languages, currencies }
 document.addEventListener('crafter:localization:changed', (e) => e.detail.currency);
 
-// Bölümleri yeniden çiz (?sections=), checkout'a git (/checkout?purpose=cart)
+// Re-render sections (?sections=), go to checkout (/checkout?purpose=cart)
 await Crafter.sections.render(['main-cart', 'header-group:header']);
 Crafter.checkout();
 ```
 
-Sepet ve SDK olayları: `crafter:ready`, `crafter:cart:updated`, `crafter:localization:changed` (hepsi `document` üzerinde,
-`event.detail` ile). v1 temalar ve harici sayfalar SDK'yı eskisi gibi kendisi yükler:
+Cart and SDK events: `crafter:ready`, `crafter:cart:updated`, `crafter:localization:changed` (all on `document`,
+with `event.detail`). v1 themes and external pages load the SDK themselves, as before:
 
 ```html
 <script src="https://unpkg.com/@crafter-cms/sdk@1.5.2/dist/crafter.min.js"></script>
 <script>window.crafter = new Crafter();</script>
 ```
 
-> **Liquid Temalarında:** İstekler aynı origin altındaki `/api/storefront` proxy'sine yönlendirilir. Proxy, mağaza tenant'ını hostname üzerinden otomatik çözer ve HttpOnly token çerezlerini backend'e güvenle iletir.
+> **In Liquid themes:** Requests go to the same-origin `/api/storefront` proxy. The proxy resolves the store tenant from the hostname automatically and securely forwards the HttpOnly token cookies to the backend.
 
 ---
 
-### 2. Harici / Headless Uygulamalarda (Doğrudan Backend Modu)
+### 2. In External / Headless Apps (Direct Backend Mode)
 
-Mobil uygulamalar, harici Node/React/Vue projeleri veya bağımsız panellerde doğrudan backend'e bağlanmak için `websiteId` belirtmeniz yeterlidir:
+To connect directly to the backend from mobile apps, external Node/React/Vue projects or standalone panels, just set `websiteId`:
 
 ```bash
 npm install @crafter-cms/sdk
@@ -115,62 +115,62 @@ import { Crafter } from '@crafter-cms/sdk';
 const crafter = new Crafter({
   mode: 'direct',
   websiteId: 'website-uuid-degeriniz',
-  // apiBase varsayılan olarak 'https://api.crafter.net.tr' adresini kullanır
-  // token: 'jwt-access-token' // opsiyonel
+  // apiBase defaults to 'https://api.crafter.net.tr'
+  // token: 'jwt-access-token' // optional
 });
 ```
 
 ---
 
-## 🛠️ Modüller & API Referansı (25 Modül)
+## 🛠️ Modules & API Reference (25 Modules)
 
-| Modül | Base Proxy Yolu | Metotlar & Açıklama |
+| Module | Base Proxy Path | Methods & Description |
 | :--- | :--- | :--- |
 | **`crafter.auth`** | `/v2/auth` *(v2)* | `signin`, `signup`, `logout`, `inGameAuth`, `refreshToken`, `forgotPassword`, `resetPassword`, `getResetTokenFromUrl`, `verifyEmail`, `resendEmail`, `validate2Fa`, `send2FaEmailCode`, `send2FaDiscordCode`, `updateTempEmail`, `getDiscordAuthUrl` |
-| **`crafter.users`** | `/v2/users` & `/users` | `getProfile('me')`, `getBalance('me')` *(hafif bakiye)*, `getByUsername('@user')`, `updateProfile(dto)`, `sendBalance({ targetUserId, amount })`, `changePassword(dto)`<br>**Duvar:** `getWall(userId)`, `postWallMessage(userId, content)`, `replyWallMessage(userId, msgId, content)`<br>**2FA:** `get2FaStatus()`, `setupAuthenticator()`, `enableAuthenticator(code)`, `sendEmail2FaCode()`, `enableEmail2Fa(code)`, `sendDiscord2FaCode()`, `enableDiscord2Fa(code)`, `disable2Fa(dto)`, `setPrimary2FaMethod(method)`, `regenerateRecoveryCodes()`<br>**Discord:** `getDiscordStatus()`, `unlinkDiscord()` |
-| **`crafter.search`** | `/metadata-search` | `metadataSearch(query, limit = 5)` *(Navbar için canlı global arama: kullanıcılar, ürünler, duyurular, sayfalar)* |
-| **`crafter.seo`** | `/v2/seo` *(v2)* | `getConfig()` *(Site geneli meta tag şablonları, OG resim, favicon)*, `getSitemapData()` *(Dinamik sitemap URL dizisi)* |
-| **`crafter.luckperms`** | `/v2/modules/luckperms` *(v2)* | `getPlayer(usernameOrUuid)` *(Oyuncunun oyun içi ana rütbesi, yetkileri ve devralınan grupları)*, `getGroups()` |
-| **`crafter.website`** | `/` *(Kök / Site Bilgisi)* | `getInfo()` *(Sitenin adı, para birimi, logosu, faviconu ve aktif eklenti modülleri: discord_bot, authme vb.)* |
-| **`crafter.store`** | `/categories`, `/products`, `/config/marketplace` | `getCategories()`, `getCategory(id)`, `getProducts()`, `getProduct(id)`, `getProductsByCategory(catId)`, `getConfig()` *(Sepette toplu indirim ayarları)* |
-| **`crafter.cart` / `marketplace`** | `/marketplace` | **Sepet:** `get()`, `add(product, qty?)`, `update(id, qty)`, `remove(id)`, `clear()`, `setCoupon(code)`, `removeCoupon()` *(storefront'ta `/cart.js` uçları, kupon sunucuda doğrulanır: `discount`, `total`, `couponDetails`, geçersizse `CrafterCouponError`; headless kullanımda localStorage 'cart'; `crafter:cart:updated`)*<br>`purchase({ productIds, coupon? })` *(Site bakiyesinden anında satın alım)*, `checkout(dto)` *(sağlayıcıda ödeme)* |
-| **`crafter.money`** | — | `format(amount, { convert?, currency?, locale? })`, `convert(amount)`, `currency`, `storeCurrency`, `rate` *(sayfa bağlamından)* |
+| **`crafter.users`** | `/v2/users` & `/users` | `getProfile('me')`, `getBalance('me')` *(lightweight balance)*, `getByUsername('@user')`, `updateProfile(dto)`, `sendBalance({ targetUserId, amount })`, `changePassword(dto)`<br>**Wall:** `getWall(userId)`, `postWallMessage(userId, content)`, `replyWallMessage(userId, msgId, content)`<br>**2FA:** `get2FaStatus()`, `setupAuthenticator()`, `enableAuthenticator(code)`, `sendEmail2FaCode()`, `enableEmail2Fa(code)`, `sendDiscord2FaCode()`, `enableDiscord2Fa(code)`, `disable2Fa(dto)`, `setPrimary2FaMethod(method)`, `regenerateRecoveryCodes()`<br>**Discord:** `getDiscordStatus()`, `unlinkDiscord()` |
+| **`crafter.search`** | `/metadata-search` | `metadataSearch(query, limit = 5)` *(live global search for the navbar: users, products, posts, pages)* |
+| **`crafter.seo`** | `/v2/seo` *(v2)* | `getConfig()` *(site-wide meta tag templates, OG image, favicon)*, `getSitemapData()` *(dynamic sitemap URL array)* |
+| **`crafter.luckperms`** | `/v2/modules/luckperms` *(v2)* | `getPlayer(usernameOrUuid)` *(the player's in-game primary rank, permissions and inherited groups)*, `getGroups()` |
+| **`crafter.website`** | `/` *(root / site info)* | `getInfo()` *(site name, currency, logo, favicon and active add-on modules: discord_bot, authme, etc.)* |
+| **`crafter.store`** | `/categories`, `/products`, `/config/marketplace` | `getCategories()`, `getCategory(id)`, `getProducts()`, `getProduct(id)`, `getProductsByCategory(catId)`, `getConfig()` *(bulk discount settings for the cart)* |
+| **`crafter.cart` / `marketplace`** | `/marketplace` | **Cart:** `get()`, `add(product, qty?)`, `update(id, qty)`, `remove(id)`, `clear()`, `setCoupon(code)`, `removeCoupon()` *(`/cart.js` endpoints on the storefront, the coupon is validated on the server: `discount`, `total`, `couponDetails`, `CrafterCouponError` if invalid; localStorage 'cart' in headless use; `crafter:cart:updated`)*<br>`purchase({ productIds, coupon? })` *(instant purchase from site balance)*, `checkout(dto)` *(payment at a provider)* |
+| **`crafter.money`** | — | `format(amount, { convert?, currency?, locale? })`, `convert(amount)`, `currency`, `storeCurrency`, `rate` *(from the page context)* |
 | **`crafter.localization`** | `POST /localization` | `get()`, `set({ language?, currency? }, { returnTo?, reload? })` |
-| **`crafter.sections`** | `?sections=` | `render(ids, { url?, swap? })` *(bölümleri yeniden çizer)* |
+| **`crafter.sections`** | `?sections=` | `render(ids, { url?, swap? })` *(re-renders sections)* |
 | **`crafter.checkout()`** | `/checkout` | `checkout({ purpose?: 'cart' \| 'balance', amount?, navigate? })` |
-| **`crafter.dom`** | `document` | `on(name, fn)`, `emit(name, detail)` *(`crafter:<ad>` CustomEvent)* |
+| **`crafter.dom`** | `document` | `on(name, fn)`, `emit(name, detail)` *(`crafter:<name>` CustomEvent)* |
 | **`crafter.posts`** | `/v2/posts` *(v2)* | `list(query?)`, `getBySlug(slug)`, `get(idOrSlug)`, `like(id)`, `getUserLiked(userId, page, limit)` |
-| **`crafter.pages`** | `/v2/pages` *(v2)* | `list()` *(tüm yayındaki sayfalar)*, `getBySlug(slug)` |
-| **`crafter.statistics`** | `/v2/statistics` *(v2)* | `get(limit = 5)` *(Son alışverişler, ödemeler, kayıtlar, en çok yükleyenler / leaderboard)* |
-| **`crafter.punishments`** | `/v2/punishments` *(v2)* | `list(page, limit)`, `search(query, type)` *(Ban, Mute vb. ceza listesi)* |
+| **`crafter.pages`** | `/v2/pages` *(v2)* | `list()` *(all published pages)*, `getBySlug(slug)` |
+| **`crafter.statistics`** | `/v2/statistics` *(v2)* | `get(limit = 5)` *(latest purchases, payments, sign-ups, top spenders / leaderboard)* |
+| **`crafter.punishments`** | `/v2/punishments` *(v2)* | `list(page, limit)`, `search(query, type)` *(ban, mute, etc. punishment list)* |
 | **`crafter.tickets`** | `/v2/tickets` *(v2)* | `list()`, `get(id)`, `create(dto)`, `reply(id, msg)`, `close(id, reason?)`, `open(id)`, `getCategories()` |
 | **`crafter.chest`** | `/chest` | `getItems('me')`, `useItem(chestItemId)`, `giftItem(targetUserId, chestItemId)` |
-| **`crafter.coupons`** | `/coupons` | `get(couponCode)` *(İndirim oranı ve geçerlilik kontrolü)* |
-| **`crafter.redeemCode`** | `/redeem-codes` | `use(code)` *(Promosyon / hediye kartı bozdurma)* |
-| **`crafter.servers`** | `/config/servers` | `getList()` *(Canlı sunucu durumu, online/max oyuncu sayısı, ping)* |
-| **`crafter.payments`** | `/payment` & `/config/payment` | `getPublicProviders()` *(Açık ödeme yöntemleri ve bonus oranları)*, `initiate({ amount, providerId, user })`, `quote()`, `check(paymentId)` |
-| **`crafter.currencies`** | `/payment/currencies` | `context()` *(müşteri para birimi, izinli para birimleri ve kurlar)*, `convert(amounts)` |
-| **`crafter.vote`** | `/config/vote-providers` | `getProviders()` *(Aktif oy siteleri ve bekleme süreleri)*, `vote(providerId)` |
-| **`crafter.legal`** | `/config/legal` | `getDocuments()` *(Kurallar, gizlilik politikası, kullanım koşulları)* |
-| **`crafter.reports`** | `/reports` | `create(reportedUserId, { reportType, reason })` *(Oyuncu şikayet etme)* |
+| **`crafter.coupons`** | `/coupons` | `get(couponCode)` *(discount rate and validity check)* |
+| **`crafter.redeemCode`** | `/redeem-codes` | `use(code)` *(redeem a promotion / gift card)* |
+| **`crafter.servers`** | `/config/servers` | `getList()` *(live server status, online/max players, ping)* |
+| **`crafter.payments`** | `/payment` & `/config/payment` | `getPublicProviders()` *(enabled payment methods and bonus rates)*, `initiate({ amount, providerId, user })`, `quote()`, `check(paymentId)` |
+| **`crafter.currencies`** | `/payment/currencies` | `context()` *(customer currency, allowed currencies and rates)*, `convert(amounts)` |
+| **`crafter.vote`** | `/config/vote-providers` | `getProviders()` *(active vote sites and cooldowns)*, `vote(providerId)` |
+| **`crafter.legal`** | `/config/legal` | `getDocuments()` *(rules, privacy policy, terms of use)* |
+| **`crafter.reports`** | `/reports` | `create(reportedUserId, { reportType, reason })` *(report a player)* |
 | **`crafter.forum`** | `/forum` | `getCategories()`, `getTopics(catId)`, `getTopic(id)`, `createTopic(catId, dto)`, `addMessage(topicId, msg)`, `replyMessage(msgId, msg)`, `likeTopic(id)`, `unlikeTopic(id)`, `getStatistics()` |
 | **`crafter.helpcenter`** | `/helpcenter` | `getOverview(query?)`, `getCategory(id)`, `getArticle(id)` |
 | **`crafter.staffForms`** | `/staff-forms` | `list()`, `get(id)`, `apply(formId, answers)` |
 
 ---
 
-## 💡 Pratik Örnekler
+## 💡 Practical Examples
 
-### 1. Header Bakiye Kutusu (Hafif & Hızlı)
+### 1. Header Balance Box (Light & Fast)
 ```javascript
-// Tam profil nesnesi yerine sadece bakiye ve para birimini çeker:
+// Fetches only the balance and currency instead of the full profile object:
 const balanceData = await crafter.users.getBalance('me');
 const { balance, currency } = balanceData.data || balanceData;
-// Sembol ve ondalık para biriminden gelir ('TL' / '₺' sabit yazılmaz)
+// The symbol and decimals come from the currency ('TL' / '₺' are never hard-coded)
 document.querySelector('#header-balance').innerText = Crafter.utils.formatMoney(balance, currency);
 ```
 
-### 2. Canlı Navbar Araması (Autocomplete)
+### 2. Live Navbar Search (Autocomplete)
 ```javascript
 const results = await crafter.search.metadataSearch('vip', 5);
 results.forEach(item => {
@@ -178,26 +178,26 @@ results.forEach(item => {
 });
 ```
 
-### 3. Oyun İçi Tek Tıkla Giriş (/web Komutu)
+### 3. In-Game One-Click Login (/web Command)
 ```javascript
-// URL'deki ?username=&uuid=&server_id=&hash= parametrelerini otomatik ayıklar:
+// Extracts the ?username=&uuid=&server_id=&hash= parameters from the URL automatically:
 await crafter.auth.inGameAuth();
-// ✅ Kullanıcı anında giriş yaptı ve oturumu kaydedildi!
+// ✅ The user is logged in instantly and the session is saved!
 ```
 
-### 4. Şifre Sıfırlama (Otomatik URL Token Algılama)
+### 4. Password Reset (Automatic URL Token Detection)
 ```javascript
-// Sayfa: /auth/password/reset?token=xyz123...
+// Page: /auth/password/reset?token=xyz123...
 await crafter.auth.resetPassword({
   new_password: 'YeniGucluSifrem123!',
   confirm_password: 'YeniGucluSifrem123!'
 });
 ```
 
-### 5. Oyuncunun Oyun İçi Rütbesi & Yetkileri (LuckPerms)
+### 5. The Player's In-Game Rank & Permissions (LuckPerms)
 ```javascript
-const lpData = await crafter.luckperms.getPlayer('oyuncu_adi');
-console.log('Ana Rütbe:', lpData.primaryGroup); // 'vip'
+const lpData = await crafter.luckperms.getPlayer('player_name');
+console.log('Primary rank:', lpData.primaryGroup); // 'vip'
 ```
 
 ---
@@ -205,19 +205,19 @@ console.log('Ana Rütbe:', lpData.primaryGroup); // 'vip'
 ## ⚡ Reaktif Event Sistemi (Event Bus)
 
 ```javascript
-// Satın alma tamamlandığında
+// When a purchase completes
 crafter.on('cart:purchased', async (order) => {
-  console.log('Satın alma başarılı:', order);
+  console.log('Purchase successful:', order);
   const data = await crafter.users.getBalance('me');
   document.querySelector('#header-balance').innerText = data.balance;
 });
 
-// Bakiye transferi gerçekleştiğinde
+// When a balance transfer happens
 crafter.on('balance:sent', (transfer) => {
-  console.log('Kredi gönderildi:', transfer);
+  console.log('Credit sent:', transfer);
 });
 
-// Çıkış yapıldığında
+// On logout
 crafter.on('auth:logout', () => {
   window.location.reload();
 });
@@ -225,27 +225,27 @@ crafter.on('auth:logout', () => {
 
 ---
 
-## 🔨 Geliştirme & Derleme
+## 🔨 Development & Build
 
 ```bash
-# Bağımlılıkları yükle
+# Install dependencies
 npm install
 
-# TypeScript tip kontrolü
+# TypeScript type check
 npm run typecheck
 
-# Üretim paketini derle (CJS, ESM, IIFE, DTS)
+# Build the production bundle (CJS, ESM, IIFE, DTS)
 npm run build
 ```
 
-Derleme sonucunda `dist/` klasöründe üretilen çıktılar:
-- `dist/crafter.min.js`: Liquid temaları için tarayıcıda doğrudan çalıştırılabilir minified bundle.
-- `dist/index.mjs`: Modern bundlerlar (Vite, Webpack, Next.js) için ESM çıktısı.
-- `dist/index.js`: Node.js ortamı için CommonJS çıktısı.
-- `dist/index.d.ts`: %100 eksiksiz TypeScript tip tanımları.
+Build outputs generated in the `dist/` folder:
+- `dist/crafter.min.js`: minified bundle that runs directly in the browser for Liquid themes.
+- `dist/index.mjs`: ESM output for modern bundlers (Vite, Webpack, Next.js).
+- `dist/index.js`: CommonJS output for Node.js.
+- `dist/index.d.ts`: 100% complete TypeScript type definitions.
 
 ---
 
-## 📄 Lisans
+## 📄 License
 
 MIT © [Crafter](https://crafter.net.tr)

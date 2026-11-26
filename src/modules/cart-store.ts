@@ -1,14 +1,14 @@
 /**
- * localStorage sepet deposu (#447): 'cart' ve 'crafter_cart_coupon' anahtarları. Headless kullanımda ve sepet uçları
- * olmayan sayfalarda kullanılır. Storefront içinde sepet sunucudadır (#434, `cart-server.ts`); `cart` kaydı oradan
- * değişen satırlarıyla sunucu sepetine eşitlenir (`crafter_cart_synced` son eşitlenen hali tutar), kupon bir kez taşınır.
+ * localStorage cart store (#447): the 'cart' and 'crafter_cart_coupon' keys. Used in headless mode and on pages without
+ * cart endpoints. Inside the storefront the cart lives on the server (#434, `cart-server.ts`); the `cart` record is synced
+ * to the server cart by its changed lines (`crafter_cart_synced` keeps the last synced state), the coupon is moved once.
  */
 
-/** Depodaki satır: checkout'un okuduğu alanlar */
+/** Line in the store: the fields checkout reads */
 export interface StoredCartLine {
   id: string;
   name: string;
-  /** Birim fiyat, mağaza para biriminde (indirimsiz) */
+  /** Unit price in the store currency (before discount) */
   price: number;
   quantity: number;
   discountType?: string | null;
@@ -22,15 +22,15 @@ export interface CartStore {
   write(lines: StoredCartLine[]): Promise<void>;
   readCoupon(): Promise<string | null>;
   writeCoupon(code: string | null): Promise<void>;
-  /** Başka sekmede ya da dışarıda değişince çağrılır; aboneliği kaldıran fonksiyon döner */
+  /** Called when it changes in another tab or elsewhere; returns a function that unsubscribes */
   subscribe(onChange: () => void): () => void;
 }
 
 export const CART_STORAGE_KEY = 'cart';
 export const CART_COUPON_KEY = 'crafter_cart_coupon';
 /**
- * Son eşitlenen localStorage sepeti (#434 düzeltme): `{ [ürün id]: adet }`. Storefront checkout'u da aynı anahtarı ve
- * biçimi kullanır; `cart` kaydında bundan sonra değişen satırlar sunucu sepetine uygulanır.
+ * The last synced localStorage cart (#434 fix): `{ [product id]: quantity }`. The storefront checkout uses the same key and
+ * format; lines in the `cart` record that change after this are applied to the server cart.
  */
 export const CART_SYNCED_KEY = 'crafter_cart_synced';
 
@@ -42,7 +42,7 @@ function storage(): Storage | null {
   }
 }
 
-/** Bozuk kayıtları ayıklar; id'siz satır atılır, miktar en az 1 tam sayı */
+/** Drops corrupt records; lines without an id are dropped, quantity is an integer of at least 1 */
 export function normalizeLines(raw: unknown): StoredCartLine[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -79,11 +79,11 @@ export class LocalStorageCartStore implements CartStore {
     if (!store) return;
     try {
       if (lines.length) store.setItem(CART_STORAGE_KEY, JSON.stringify(lines));
-      // Sunucuya eşitlenmiş sepet boşaltıldıysa '[]' kalır: anahtarın yokluğu "boşaltıldı" sayılmaz, satırlar düşmezdi
+      // If a cart synced to the server was emptied, '[]' remains: a missing key does not count as "emptied", lines would not drop
       else if (store.getItem(CART_SYNCED_KEY) !== null) store.setItem(CART_STORAGE_KEY, '[]');
       else store.removeItem(CART_STORAGE_KEY);
     } catch {
-      // Gizli gezinme / kota: sepet yalnızca bu sayfada kalır
+      // Private browsing / quota: the cart stays on this page only
     }
   }
 
@@ -102,7 +102,7 @@ export class LocalStorageCartStore implements CartStore {
       if (code) store.setItem(CART_COUPON_KEY, code);
       else store.removeItem(CART_COUPON_KEY);
     } catch {
-      // yok sayılır
+      // ignored
     }
   }
 

@@ -1,40 +1,40 @@
-# 📚 Crafter SDK Geliştirici Belgeleri (Wiki)
+# 📚 Crafter SDK Developer Documentation (Wiki)
 
-Crafter SDK (`@crafter-cms/sdk`), Minecraft ve oyun toplulukları için geliştirilen Crafter Storefront Liquid temaları ve harici (Headless / React / Vue / Node.js) web uygulamaları için resmi JavaScript/TypeScript istemci kütüphanesidir.
+The Crafter SDK (`@crafter-cms/sdk`) is the official JavaScript/TypeScript client library for Crafter Storefront Liquid themes built for Minecraft and gaming communities, and for external (headless / React / Vue / Node.js) web applications.
 
-Kütüphane; tüm API uç noktalarını, DTO doğrulamalarını, token yaşam döngüsünü (Refresh Token, HttpOnly Cookie entegrasyonu), hata yönetimini ve olay dinleyicilerini (Event Bus) tek bir çatı altında toplar.
+The library brings all API endpoints, DTO validation, the token lifecycle (refresh token, HttpOnly cookie integration), error handling and event listeners (Event Bus) together under one roof.
 
 ---
 
-## 🗂️ Modül Rehberleri
+## 🗂️ Module Guides
 
-| No | Modül Dokümanı | Kapsadığı Alanlar |
+| No | Module Document | Areas Covered |
 | :---: | :--- | :--- |
-| **01** | [**Kimlik Doğrulama (`auth`)**](./01-auth.md) | Giriş, Kayıt, Oyun İçi (/web) Hızlı Giriş, 2FA Doğrulama, Şifre Sıfırlama, Discord OAuth, Çıkış |
-| **02** | [**Kullanıcılar & Profil (`users`)**](./02-users.md) | Profil Getirme, Hafif Bakiye Sorgulama, Bakiye Transferi, Profil Duvarı (Wall), Profil 2FA Ayarları, Discord Bağlama |
-| **03** | [**Mağaza & Sepet (`store` & `cart`)**](./03-store-and-cart.md) | Kategoriler, Ürünler, Sepet Satın Alımı, Sepette Toplu İndirim (Bulk Discount) |
-| **04** | [**Sandık Modülü (`chest`)**](./04-chest.md) | Oyuncu Sandığı, Eşya Kullanma, Arkadaşa Hediye Gönderme |
-| **05** | [**Destek Talepleri (`tickets`)**](./05-tickets.md) | Talep Listeleme, Talep Oluşturma, Yanıtlama, Kapatma ve Yeniden Açma |
-| **06** | [**Duyurular & Sayfalar (`posts` & `pages`)**](./06-posts-and-pages.md) | Duyuru Listeleme, Slug/ID Detayı, Beğenme, Kullanıcı Beğenileri, Sabit Sayfalar |
-| **07** | [**Ödeme İşlemleri (`payments`)**](./07-payments.md) | Aktif Ödeme Sağlayıcıları (PayTR, Shopier vb.), Ödeme Başlatma (Iframe/Redirect), Durum Sorgulama, LLC: Stripe Payment Element, vergi kırılımı, bakiye koşulları, teslimat durumu, tipli ödeme hataları, müşteri para birimi (`currencies`, kur teklifi), `formatMoney` |
-| **08** | [**Kuponlar & Hediye Kodları (`coupons` & `redeemCode`)**](./08-coupons-and-redeem.md) | Sepet Kuponu Kontrolü, Promosyon ve Hediye Kartı Bozdurma |
-| **09** | [**İstatistikler & Cezalar (`statistics` & `punishments`)**](./09-statistics-and-punishments.md) | Son Yüklemeler, Satın Alımlar, Lider Tablosu (Leaderboard), Ceza Listesi ve Arama |
-| **10** | [**Sunucular & Oy Verme (`servers` & `vote`)**](./10-servers-and-vote.md) | Canlı Sunucu Durumu (Ping, Online Oyuncu), Oy Siteleri Listesi ve Oy Kullanma |
-| **11** | [**Hukuki Belgeler & Raporlar (`legal` & `reports`)**](./11-legal-and-reports.md) | Kurallar, Gizlilik Politikası, Kullanım Şartları, Kötüye Kullanım Şikayeti (Report) |
-| **12** | [**Forum & Yardım Merkezi (`forum` & `helpcenter`)**](./12-forum-and-helpcenter.md) | Forum Kategorileri, Konular, Mesajlar, Beğeni/Unlike, Yardım Merkezi Makaleleri ve SSS |
-| **13** | [**Yetkili Başvuru Formları (`staffForms`)**](./13-staff-forms.md) | Aktif Başvuru Formları, Form Alanları ve Başvuru Gönderme |
-| **14** | [**Arama, SEO, LuckPerms & Site Bilgisi**](./14-search-seo-luckperms-website.md) | Canlı Canlı Navbar Arama (`search`), SEO Konfigürasyonu & Sitemap (`seo`), Oyun İçi Rank (`luckperms`), Site Bilgileri (`website`) |
-| **15** | [**Event Bus & Hata Yönetimi**](./15-events-and-errors.md) | Reaktif Event Dinleme (`crafter.on`), Hata Yakalama (`CrafterError`) ve Dual-Mode Mimarisi |
-| **16** | [**Lexical Zengin Metin Motoru (`crafter.utils`)**](./16-lexical-rich-text.md) | `lexicalToHtml`, `lexicalToText` (özet çıkarma) ve `toLexical` (otomatik sarmalama) |
-| **17** | [**Tema v2 çalışma zamanı (`window.Crafter`)**](./17-theme-runtime.md) | SDK'yı beklemek (`crafter:ready`), sunucu sepeti, `money.format`, `localization`, `sections.render`, `checkout()`, DOM olayları, örnek bölüm |
+| **01** | [**Authentication (`auth`)**](./01-auth.md) | Sign-in, sign-up, in-game (/web) quick login, 2FA verification, password reset, Discord OAuth, logout |
+| **02** | [**Users & Profile (`users`)**](./02-users.md) | Fetching profiles, lightweight balance lookup, balance transfer, profile wall, profile 2FA settings, Discord linking |
+| **03** | [**Store & Cart (`store` & `cart`)**](./03-store-and-cart.md) | Categories, products, cart purchase, bulk discount in the cart |
+| **04** | [**Chest Module (`chest`)**](./04-chest.md) | Player chest, using items, sending gifts to friends |
+| **05** | [**Support Tickets (`tickets`)**](./05-tickets.md) | Listing, creating, replying to, closing and reopening tickets |
+| **06** | [**Posts & Pages (`posts` & `pages`)**](./06-posts-and-pages.md) | Listing posts, slug/ID details, likes, user likes, static pages |
+| **07** | [**Payments (`payments`)**](./07-payments.md) | Active payment providers (PayTR, Shopier, etc.), starting a payment (iframe/redirect), status lookup, LLC: Stripe Payment Element, tax breakdown, balance conditions, delivery status, typed payment errors, customer currency (`currencies`, rate quote), `formatMoney` |
+| **08** | [**Coupons & Gift Codes (`coupons` & `redeemCode`)**](./08-coupons-and-redeem.md) | Cart coupon check, redeeming promotions and gift cards |
+| **09** | [**Statistics & Punishments (`statistics` & `punishments`)**](./09-statistics-and-punishments.md) | Latest top-ups, purchases, leaderboard, punishment list and search |
+| **10** | [**Servers & Voting (`servers` & `vote`)**](./10-servers-and-vote.md) | Live server status (ping, online players), vote site list and voting |
+| **11** | [**Legal Documents & Reports (`legal` & `reports`)**](./11-legal-and-reports.md) | Rules, privacy policy, terms of use, abuse reports |
+| **12** | [**Forum & Help Center (`forum` & `helpcenter`)**](./12-forum-and-helpcenter.md) | Forum categories, topics, messages, like/unlike, help center articles and FAQ |
+| **13** | [**Staff Application Forms (`staffForms`)**](./13-staff-forms.md) | Active application forms, form fields and submitting applications |
+| **14** | [**Search, SEO, LuckPerms & Site Info**](./14-search-seo-luckperms-website.md) | Live navbar search (`search`), SEO configuration & sitemap (`seo`), in-game rank (`luckperms`), site info (`website`) |
+| **15** | [**Event Bus & Error Handling**](./15-events-and-errors.md) | Reactive event listening (`crafter.on`), error handling (`CrafterError`) and the dual-mode architecture |
+| **16** | [**Lexical Rich Text Engine (`crafter.utils`)**](./16-lexical-rich-text.md) | `lexicalToHtml`, `lexicalToText` (excerpts) and `toLexical` (automatic wrapping) |
+| **17** | [**Theme v2 runtime (`window.Crafter`)**](./17-theme-runtime.md) | Waiting for the SDK (`crafter:ready`), server cart, `money.format`, `localization`, `sections.render`, `checkout()`, DOM events, a sample section |
 
 ---
 
-## ⚡ Hızlı Başlangıç
+## ⚡ Quick Start
 
-### 1. Liquid Temalarda Kullanım (tema v2: SDK zorunlu, storefront ekler)
-Tema v2 sayfalarında storefront SDK'yı `{{ content_for_header }}` ile kendisi ekler ve başlatır; tema `<script src>` ya da
-`new Crafter()` yazmaz. `window.Crafter` hazır örnektir (ayrıntı: [17. Tema v2 çalışma zamanı](./17-theme-runtime.md)):
+### 1. Usage in Liquid Themes (theme v2: SDK required, added by the storefront)
+On theme v2 pages the storefront adds and starts the SDK itself with `{{ content_for_header }}`; the theme does not write `<script src>` or
+`new Crafter()`. `window.Crafter` is a ready instance (details: [17. Theme v2 runtime](./17-theme-runtime.md)):
 
 ```js
 // assets/theme.js
@@ -44,16 +44,16 @@ function onCrafterReady(fn) {
 }
 
 onCrafterReady((Crafter) => {
-  // Örnek: Hafif bakiye kutusunu doldur (para biçimi SDK ile)
+  // Example: fill the lightweight balance box (money formatting via the SDK)
   Crafter.users.getBalance('me').then((res) => {
     document.querySelector('#user-balance').textContent = Crafter.money.format(res.balance, { convert: false });
   });
 });
 ```
 
-v1 temalar ve harici sayfalar SDK'yı kendisi yükler: `<script src="https://unpkg.com/@crafter-cms/sdk@1.5.2/dist/crafter.min.js"></script>` ve `new Crafter()`.
+v1 themes and external pages load the SDK themselves: `<script src="https://unpkg.com/@crafter-cms/sdk@1.5.2/dist/crafter.min.js"></script>` and `new Crafter()`.
 
-### 2. Harici / Headless Uygulamalarda Kullanım (NPM / Modern Bundler)
+### 2. Usage in External / Headless Apps (NPM / Modern Bundler)
 ```bash
 npm install @crafter-cms/sdk
 ```
@@ -64,7 +64,7 @@ import { Crafter } from '@crafter-cms/sdk';
 const crafter = new Crafter({
   mode: 'direct',
   websiteId: 'tenant-uuid-12345',
-  // İsteğe bağlı token
+  // Optional token
   token: 'jwt-access-token'
 });
 

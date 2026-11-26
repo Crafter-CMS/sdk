@@ -1,17 +1,17 @@
-# 📦 Oyuncu Sandığı Modülü (`crafter.chest`)
+# 📦 Player Chest Module (`crafter.chest`)
 
-Satın alınan veya hediye edilen ürünlerin oyuna aktarılmadan önce bekletildiği web envanterini yönetir. Eşyayı oyun içi sunucuya gönderme (kullanma) ve başka bir kullanıcıya hediye etme işlemlerini kapsar.
+Manages the web inventory where purchased or gifted items wait before being moved into the game. Covers sending an item to the in-game server (using it) and gifting it to another user.
 
 ---
 
-## 📌 Metotlar ve Kullanım Örnekleri
+## 📌 Methods and Usage Examples
 
 ### 1. `getItems(userId?)`
-Kullanıcının sandığındaki eşyaları listeler.
+Lists the items in the user's chest.
 
-* **HTTP Rota:** `GET /chest/:userId`
-* **Varsayılan Parametre:** `'me'`
-* **Dönüş:** `ChestItem[]`
+* **HTTP Route:** `GET /chest/:userId`
+* **Default parameter:** `'me'`
+* **Returns:** `ChestItem[]`
   ```typescript
   interface ChestItem {
     id: string;
@@ -20,32 +20,32 @@ Kullanıcının sandığındaki eşyaları listeler.
       name: string;
       server_id?: string;
     };
-    used: boolean;      // Eşya kullanıldı mı?
+    used: boolean;      // Has the item been used?
     createdAt?: string;
     updatedAt?: string;
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   const items = await crafter.chest.getItems('me');
 
-  // Henüz kullanılmamış aktif sandık eşyaları:
+  // Active chest items that have not been used yet:
   const activeItems = items.filter(item => !item.used);
-  console.log(`Sandıkta ${activeItems.length} adet teslim alınmamış eşyanız var.`);
+  console.log(`You have ${activeItems.length} unclaimed items in your chest.`);
   ```
 
 ---
 
 ### 2. `useItem(chestItemId, userId?)`
-Sandıktaki bir eşyayı oyuna aktarmak üzere kullanır (Sunucuya komut gönderilir).
+Uses an item in the chest to move it into the game (a command is sent to the server).
 
-* **HTTP Rota:** `POST /chest/:userId/use/:chestItemId`
-* **Varsayılan Parametre:** `userId = 'me'`
-* **Dönüş:**
+* **HTTP Route:** `POST /chest/:userId/use/:chestItemId`
+* **Default parameter:** `userId = 'me'`
+* **Returns:**
   ```json
   {
     "success": true,
-    "message": "Eşya başarıyla kullanıldı ve sunucuya iletildi.",
+    "message": "Item used and sent to the server.",
     "item": {
       "id": "item-uuid",
       "used": true,
@@ -53,36 +53,36 @@ Sandıktaki bir eşyayı oyuna aktarmak üzere kullanır (Sunucuya komut gönder
     }
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   try {
     const res = await crafter.chest.useItem('chest-item-123');
-    alert('Eşyanız oyuna teslim edildi!');
+    alert('Your item was delivered in game!');
   } catch (err) {
-    alert('Eşya kullanılamadı: ' + err.message);
+    alert('Could not use the item: ' + err.message);
   }
   ```
 
 ---
 
 ### 3. `giftItem(targetUserId, chestItemId, fromUserId?)`
-Sandıktaki henüz kullanılmamış bir eşyayı başka bir oyuncunun sandığına hediye olarak aktarır.
+Moves an unused item in the chest to another player's chest as a gift.
 
-* **HTTP Rota:** `POST /chest/:from/gift/:to/:chestItemId`
-* **Varsayılan Parametre:** `fromUserId = 'me'`
-* **Dönüş:**
+* **HTTP Route:** `POST /chest/:from/gift/:to/:chestItemId`
+* **Default parameter:** `fromUserId = 'me'`
+* **Returns:**
   ```json
   {
     "success": true,
-    "message": "Eşya başarıyla hediye edildi.",
+    "message": "Item gifted.",
     "newChestItem": {
-      "id": "yeni-esya-id",
+      "id": "new-item-id",
       "used": false
     }
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   await crafter.chest.giftItem('@ArkadasiminAdi', 'chest-item-123');
-  alert('Eşya başarıyla arkadaşınıza hediye edildi!');
+  alert('The item was gifted to your friend!');
   ```

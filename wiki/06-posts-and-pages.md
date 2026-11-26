@@ -1,26 +1,26 @@
-# 📰 Duyurular & Sayfalar (`crafter.posts` & `crafter.pages`)
+# 📰 Posts & Pages (`crafter.posts` & `crafter.pages`)
 
-Haberler, güncellemeler, blog yazıları ve statik CMS sayfalarının (Kurallar, Hakkımızda vb.) listelenmesi ve detaylarının görüntülenmesini yönetir.
+Handles listing and showing news, updates, blog posts and static CMS pages (rules, about us, etc.).
 
 ---
 
-## 📌 Duyurular Modülü (`crafter.posts`)
+## 📌 Posts Module (`crafter.posts`)
 
 ### 1. `list(query?)`
-Duyuruları sayfalanmış, filtrelenmiş ve sıralanmış olarak getirir.
+Fetches posts paginated, filtered and sorted.
 
-* **HTTP Rota:** `GET /v2/posts`
-* **Sorgu Parametreleri:**
+* **HTTP Route:** `GET /v2/posts`
+* **Query parameters:**
   ```typescript
   interface PostQueryDto {
-    page?: number;        // Varsayılan: 1
-    limit?: number;       // Varsayılan: 10
-    search?: string;      // Başlıkta arama
+    page?: number;        // Default: 1
+    limit?: number;       // Default: 10
+    search?: string;      // Search in the title
     categoryId?: string;
     sortBy?: string;
   }
   ```
-* **Dönüş:**
+* **Returns:**
   ```typescript
   interface PaginatedPostsResponse {
     success: boolean;
@@ -33,21 +33,21 @@ Duyuruları sayfalanmış, filtrelenmiş ve sıralanmış olarak getirir.
     };
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   const res = await crafter.posts.list({ page: 1, limit: 6 });
   res.data.forEach(post => {
-    console.log(`[${post.title}] - Beğeni: ${post.likeCount}, Görüntülenme: ${post.viewCount}`);
+    console.log(`[${post.title}] - Likes: ${post.likeCount}, Views: ${post.viewCount}`);
   });
   ```
 
 ---
 
 ### 2. `get(idOrSlug)` & `getBySlug(slug)`
-Tek bir duyurunun tüm içeriğini getirir. Backend ID ve slug'ı aynı endpoint üzerinden otomatik çözümler. Görüntülenme sayacı backend tarafından otomatik artırılır.
+Fetches the full content of a single post. The backend resolves the ID and the slug on the same endpoint automatically. The view counter is incremented by the backend automatically.
 
-* **HTTP Rota:** `GET /v2/posts/:idOrSlug`
-* **Dönüş:** Doğrudan `PostItem` nesnesi (SDK tarafından `res.data` otomatik çıkarılır).
+* **HTTP Route:** `GET /v2/posts/:idOrSlug`
+* **Returns:** A `PostItem` object directly (the SDK unwraps `res.data` automatically).
   ```typescript
   interface PostItem {
     id: string;
@@ -64,9 +64,9 @@ Tek bir duyurunun tüm içeriğini getirir. Backend ID ve slug'ı aynı endpoint
     createdAt: string;
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
-  const post = await crafter.posts.get('yeni-sezon-acildi');
+  const post = await crafter.posts.get('new-season-is-open');
   document.querySelector('#post-title').innerText = post.title;
   document.querySelector('#post-content').innerHTML = post.content;
   ```
@@ -74,11 +74,11 @@ Tek bir duyurunun tüm içeriğini getirir. Backend ID ve slug'ı aynı endpoint
 ---
 
 ### 3. `like(postId)`
-Duyuruyu beğenir veya var olan beğeniyi geri alır (Toggle Like).
+Likes the post or removes an existing like (toggle like).
 
-* **HTTP Rota:** `POST /v2/posts/:id/like`
-* **Dönüş:** `{ success: true, data: { liked: boolean, likeCount: number }, message: string }`
-* **Örnek:**
+* **HTTP Route:** `POST /v2/posts/:id/like`
+* **Returns:** `{ success: true, data: { liked: boolean, likeCount: number }, message: string }`
+* **Example:**
   ```javascript
   const res = await crafter.posts.like('post-uuid-123');
   document.querySelector('#like-count').innerText = res.data.likeCount;
@@ -87,43 +87,43 @@ Duyuruyu beğenir veya var olan beğeniyi geri alır (Toggle Like).
 ---
 
 ### 4. `getUserLiked(userId?, page?, limit?)`
-Bir kullanıcının beğendiği duyuruları listeler (Örn: Profil sayfasında "Beğendiklerim" sekmesi).
+Lists the posts a user liked (e.g. a "My likes" tab on the profile page).
 
-* **HTTP Rota:** `GET /v2/posts/user/:userId/liked`
-* **Varsayılan:** `userId = 'me'`
-* **Örnek:**
+* **HTTP Route:** `GET /v2/posts/user/:userId/liked`
+* **Default:** `userId = 'me'`
+* **Example:**
   ```javascript
   const liked = await crafter.posts.getUserLiked('me', 1, 10);
-  console.log('Beğendiğim post sayısı:', liked.pagination.total);
+  console.log('Posts I liked:', liked.pagination.total);
   ```
 
 ---
 
-## 📄 Sabit Sayfalar Modülü (`crafter.pages`)
+## 📄 Static Pages Module (`crafter.pages`)
 
-Yöneticinin CMS üzerinden oluşturduğu özel sayfaları (Örn: `/sayfa/hakkimizda`, `/sayfa/yetkili-ekibi`) listeler.
+Lists the custom pages the admin created in the CMS (e.g. `/page/about-us`, `/page/staff-team`).
 
 ### 5. `list()`
-Yalnızca yayında olan (`isPublished: true`) sayfaları listeler.
+Lists only published (`isPublished: true`) pages.
 
-* **HTTP Rota:** `GET /v2/pages/public`
-* **Dönüş:** `PageItem[]`
-* **Örnek:**
+* **HTTP Route:** `GET /v2/pages/public`
+* **Returns:** `PageItem[]`
+* **Example:**
   ```javascript
   const pages = await crafter.pages.list();
   pages.forEach(p => {
-    console.log(`${p.title} -> /sayfa/${p.slug}`);
+    console.log(`${p.title} -> /page/${p.slug}`);
   });
   ```
 
 ---
 
 ### 6. `getBySlug(slug)`
-Sayfanın başlığını ve HTML içeriğini slug ile çeker.
+Fetches the page title and HTML content by slug.
 
-* **HTTP Rota:** `GET /v2/pages/slug/:slug`
-* **Dönüş:** `PageItem` (`id, title, slug, content, isPublished, viewCount`)
-* **Örnek:**
+* **HTTP Route:** `GET /v2/pages/slug/:slug`
+* **Returns:** `PageItem` (`id, title, slug, content, isPublished, viewCount`)
+* **Example:**
   ```javascript
   const page = await crafter.pages.getBySlug('hakkimizda');
   document.title = page.title;

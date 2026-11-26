@@ -22,7 +22,7 @@ import {
   WaitForPaymentOptions,
 } from '../types';
 
-/** Payment modülünün kullandığı yapılandırma alanları */
+/** Configuration fields used by the payment module */
 export type PaymentsModuleOptions = Pick<CrafterConfig, 'websiteId' | 'stripePublishableKey'>;
 
 function toNumber(value: unknown, fallback = 0): number {
@@ -34,7 +34,7 @@ function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-/** Backend yanıtındaki Stripe Tax alanlarından tipli vergi kırılımı; `subtotal` yoksa null. */
+/** Typed tax breakdown from the Stripe Tax fields in the backend response; null if there is no `subtotal`. */
 export function parseTaxBreakdown(raw: Record<string, any> | null | undefined): PaymentTaxBreakdown | null {
   if (!raw || typeof raw.subtotal !== 'number') return null;
   const subtotal = raw.subtotal;
@@ -59,10 +59,10 @@ export function parseTaxBreakdown(raw: Record<string, any> | null | undefined): 
 }
 
 /**
- * Ödeme başlatma / sepet ödeme yanıtını normalize eder (eklemeli: ham alanlar korunur).
- * - `paymentId`: backend `payment_id` döndürür; `paymentId` yoksa doldurulur.
- * - `tax`: Stripe Tax kırılımı (yoksa null).
- * - `stripe`: yalnızca `type === 'stripe'` ve `clientSecret` varsa (satıcı LLC + CrafterPayments).
+ * Normalizes the payment initiation / cart payment response (additive: raw fields are kept).
+ * - `paymentId`: the backend returns `payment_id`; `paymentId` is filled if missing.
+ * - `tax`: Stripe Tax breakdown (null if absent).
+ * - `stripe`: only when `type === 'stripe'` and `clientSecret` exists (seller LLC + CrafterPayments).
  */
 export function normalizePaymentResponse<T extends Record<string, any>>(
   raw: T,
@@ -90,13 +90,13 @@ export function normalizePaymentResponse<T extends Record<string, any>>(
   return result as T & InitiatePaymentResponse;
 }
 
-/** Alıcının onayladığı sözleşme sürümü / bölge eki (CrafterPayments onay kaydı, chargeback kanıtı). */
+/** Terms version / region suffix the buyer accepted (CrafterPayments consent record, chargeback evidence). */
 export interface LegalTermsConsent {
   version: string;
   region?: string;
 }
 
-/** Sözleşme onayı başlıkları: x-legal-terms-version / x-legal-terms-region */
+/** Terms consent headers: x-legal-terms-version / x-legal-terms-region */
 export function legalTermsHeaders(consent?: LegalTermsConsent): Record<string, string> | undefined {
   if (!consent?.version) return undefined;
   const headers: Record<string, string> = { 'x-legal-terms-version': consent.version };
@@ -104,7 +104,7 @@ export function legalTermsHeaders(consent?: LegalTermsConsent): Record<string, s
   return headers;
 }
 
-/** Yeni teklifle bir kez tekrar denenen hatalar */
+/** Errors retried once with a new quote */
 const QUOTE_RETRY_ERRORS: string[] = [
   PaymentErrorType.PRESENTMENT_QUOTE_EXPIRED,
   PaymentErrorType.PRESENTMENT_QUOTE_MISMATCH,
@@ -114,10 +114,10 @@ const QUOTE_RETRY_ERRORS: string[] = [
 const errorType = (err: unknown) => (isCrafterError(err) ? err.type : undefined);
 
 /**
- * Müşteri para biriminde ödeme (#424, #426): teklif alınır, ödeme `quoteId` ve teklifin para birimiyle başlatılır.
- * Teklif süresi dolduysa / sepet değiştiyse bir kez yeni teklif alınır. Mağaza müşteri para birimini kapattıysa
- * (`customer_currency_not_allowed`) ödeme teklifsiz, mağaza para biriminde başlatılır (`customerCurrencyDisabled`).
- * Diğer hatalar olduğu gibi fırlatılır.
+ * Payment in the customer currency (#424, #426): a quote is fetched, payment starts with `quoteId` and the quote's currency.
+ * If the quote expired / the cart changed, a new quote is fetched once. If the store disabled the customer currency
+ * (`customer_currency_not_allowed`), payment starts without a quote, in the store currency (`customerCurrencyDisabled`).
+ * Other errors are thrown as is.
  */
 export async function payWithQuote<T extends Record<string, any>>(
   getQuote: () => Promise<PresentmentQuote>,
@@ -147,9 +147,9 @@ const DELIVERY_STATES = ['pending', 'delivered', 'failed', 'refunded'] as const;
 const DELIVERY_STATUSES: PaymentDeliveryStatus[] = ['PENDING', 'DELIVERED', 'NEEDS_REVIEW', 'REFUNDED'];
 
 /**
- * Public durum yanıtını yorumlar. Backend'in public `delivery` özeti:
- * pending → PENDING, delivered → DELIVERED, failed → NEEDS_REVIEW (teslim edilemedi / incelemede), refunded → REFUNDED.
- * Backend ileride `deliveryStatus` döndürürse o kullanılır.
+ * Interprets the public status response. The backend's public `delivery` summary:
+ * pending → PENDING, delivered → DELIVERED, failed → NEEDS_REVIEW (could not be delivered / under review), refunded → REFUNDED.
+ * If the backend returns `deliveryStatus` in the future, that is used.
  */
 export function parsePaymentStatus(paymentId: string, raw: Record<string, any> | null | undefined): PaymentStatusResult {
   const body = raw && typeof raw === 'object' && raw.data && typeof raw.data === 'object' && !raw.status ? raw.data : raw || {};
@@ -188,7 +188,7 @@ export function parsePaymentStatus(paymentId: string, raw: Record<string, any> |
   };
 }
 
-/** Formdaki en yüksek bakiye yükleme tutarı: sağlayıcı üst sınırı, tek yükleme limiti ve kalan ödenmiş bakiye hakkı. */
+/** Highest balance top-up amount for the form: provider cap, single top-up limit and the remaining paid balance allowance. */
 export function topUpMaxAmount(policy: BalanceTopUpPolicy | null | undefined, providerMax?: number): number {
   const limits = [providerMax || 1000000];
   if (policy?.closedLoop) {
@@ -230,7 +230,7 @@ export class PaymentsModule {
 
   /**
    * Initiate a payment session (PayTR, Shopier, KuveytTürk, CrafterPayments etc.).
-   * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi) bulunur.
+   * When the seller is an LLC with CrafterPayments, the response includes `stripe` (clientSecret, publishableKey, tax).
    * POST /payment/initiate
    */
   public async initiate(
@@ -246,7 +246,7 @@ export class PaymentsModule {
         payload.quoteId = quote.quoteId;
         payload.currency = quote.currency;
       } else if (options.useCustomerCurrency) {
-        // Teklifsiz ödeme mağaza para biriminde: para birimini sunucu belirler
+        // A payment without a quote is in the store currency: the server decides the currency
         delete payload.quoteId;
         delete payload.currency;
       }
@@ -273,9 +273,9 @@ export class PaymentsModule {
   }
 
   /**
-   * Kilitli kur teklifi (~30 dk): tutar mağaza para biriminde hesaplanır, müşterinin para birimini sunucu belirler
-   * (`currency` yalnızca öneridir). Ödeme `quoteId` ile başlatılır. Oturum gerektirir.
-   * Mağaza müşteri para birimini kapattıysa 400 `customer_currency_not_allowed`.
+   * Locked rate quote (~30 min): the amount is calculated in the store currency, the server decides the customer's currency
+   * (`currency` is only a suggestion). Payment starts with `quoteId`. Requires a session.
+   * 400 `customer_currency_not_allowed` if the store disabled the customer currency.
    * POST /payment/quote
    */
   public async quote(data: PresentmentQuoteRequest): Promise<PresentmentQuote> {
@@ -299,7 +299,7 @@ export class PaymentsModule {
   }
 
   /**
-   * Ödeme ve teslimat durumu (oturum gerektirmez). Stripe ödemesinde webhook gecikirse backend ödemeyi Stripe'tan okur.
+   * Payment and delivery status (no session required). For a Stripe payment, if the webhook is late the backend reads the payment from Stripe.
    * GET /payment/status/:paymentId
    */
   public async getStatus(paymentId: string): Promise<PaymentStatusResult> {
@@ -312,9 +312,9 @@ export class PaymentsModule {
   }
 
   /**
-   * Ödeme sonucu kesinleşene kadar `getStatus` ile yoklar (Stripe `confirmPayment` sonrası).
-   * Ödeme alındı ama teslimat sürüyorsa yoklama devam eder. Süre dolarsa son görülen durum döner.
-   * Ağ hataları yutulur, yoklama sürer.
+   * Polls with `getStatus` until the payment result is final (after Stripe `confirmPayment`).
+   * If the payment was received but delivery is still running, polling continues. On timeout the last seen status is returned.
+   * Network errors are swallowed and polling continues.
    */
   public async waitForResult(paymentId: string, options: WaitForPaymentOptions = {}): Promise<PaymentStatusResult> {
     const { attempts = 20, intervalMs = 1500, signal } = options;
@@ -325,7 +325,7 @@ export class PaymentsModule {
         last = await this.getStatus(paymentId);
         if (last.final) return last;
       } catch {
-        // Ağ hatasında yoklamaya devam edilir
+        // Keep polling on a network error
       }
       if (i < attempts - 1) {
         try {
@@ -339,8 +339,8 @@ export class PaymentsModule {
   }
 
   /**
-   * Bakiye yükleme koşulları: açık mı, limitler (USD ve mağaza para birimi), ödenmiş / bonus bakiye
-   * ve koşul metninin gösterilip gösterilmeyeceği (`showTerms`). Oturum gerektirir.
+   * Balance top-up conditions: whether enabled, limits (USD and the store currency), paid / bonus balance
+   * and whether to show the terms text (`showTerms`). Requires a session.
    * GET /payment/balance-top-up/policy?websiteId=
    */
   public async getTopUpPolicy(websiteId?: string): Promise<BalanceTopUpPolicy> {

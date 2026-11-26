@@ -1,144 +1,145 @@
-# Değişiklik Günlüğü
+# Changelog
 
 ## 1.5.2 — 2026-11-26
 
-Yayın hazırlığı (#255, #258) ve sepet eşitleme düzeltmesi (#434). npm'deki son sürüm 1.1.0; 1.2.0–1.5.1 npm'e yayınlanmadı ve bu sürümle birlikte çıkar.
-Kıran değişiklik yok.
+Release preparation (#255, #258) and a cart sync fix (#434). The latest version on npm is 1.1.0; 1.2.0–1.5.1 were not published to npm and ship together with this version.
+No breaking changes.
 
-### Düzeltilenler
-- Headless (`mode: 'direct'`) varsayılan API adresi: `Crafter` yapıcısı `apiBase`'i her modda `/api/storefront` ile
-  dolduruyordu; `new Crafter({ mode: 'direct', websiteId })` istekleri `https://api.crafter.net.tr` yerine göreli
-  `/api/storefront/website/...` adresine gidiyordu (Node'da çalışmıyordu). Varsayılan artık moda göre seçilir
-  (`direct` → `https://api.crafter.net.tr`, `storefront` → `/api/storefront`); `websiteId` verilip mod verilmezse
-  `config.mode` de `'direct'` olur. Verilen `apiBase` aynen korunur.
+### Fixed
+- Headless (`mode: 'direct'`) default API URL: the `Crafter` constructor filled `apiBase` with `/api/storefront` in every
+  mode; `new Crafter({ mode: 'direct', websiteId })` requests went to the relative `/api/storefront/website/...` URL
+  instead of `https://api.crafter.net.tr` (which did not work in Node). The default is now chosen by mode
+  (`direct` → `https://api.crafter.net.tr`, `storefront` → `/api/storefront`); if `websiteId` is given without a mode,
+  `config.mode` also becomes `'direct'`. A given `apiBase` is kept as is.
 
-- Sepet eşitleme (#434): localStorage sepeti (`cart`) "sunucu sepeti doluysa at" kuralıyla siliniyordu; giriş yapmış
-  müşteride eski, ödenmemiş bir sunucu sepeti varsa oyuncunun yeni seçimi kayboluyordu. Ayrıca toplu ekleme
-  (`/cart/add.js { items }`) adetleri topladığından tekrar çalışan taşıma (iki sekme, ağ hatası sonrası) adetleri
-  katlıyordu. Artık storefront checkout'uyla aynı kural: son eşitlenen hal `crafter_cart_synced` kaydında
-  (`{ [ürün id]: adet }`) tutulur; ondan sonra eklenen / adedi değişen satırlar `/cart/add.js { items, replace: true }`
-  ile adede ayarlanır (toplanmaz), `cart`'tan çıkarılan satır `/cart/change.js { quantity: 0 }` ile sunucudan da düşer,
-  değişmeyen satır gönderilmez (sunucuda / başka cihazda yapılan değişiklik korunur). Tekrar çalışması sonucu
-  değiştirmez. `cart` anahtarı artık silinmez (tema sepeti olarak kalır); `crafter_cart_coupon` eskisi gibi bir kez
-  denenip silinir. 4xx ret o hali eşitlenmiş sayar, ağ / sunucu hatasında sonraki sayfada yeniden denenir.
-  `replace` için storefront PR 730 (müşteride backend `/cart/merge` `strategy: 'latest'`, backend PR 729) gerekir;
-  eski storefront alanı yok sayar ve adetleri toplar.
-- localStorage deposu: eşitlenmiş (kaydı olan) sepet boşaltılınca `cart` anahtarı silinmek yerine `'[]'` olur; böylece
-  boşaltma sunucu sepetine de yansır.
+- Cart sync (#434): the localStorage cart (`cart`) was deleted by the "discard if the server cart is not empty" rule; for a
+  logged-in customer with an old, unpaid server cart, the player's new selection was lost. Also, because bulk add
+  (`/cart/add.js { items }`) adds quantities, a migration that ran again (two tabs, after a network error) doubled the
+  quantities. It now follows the same rule as the storefront checkout: the last synced state is kept in the
+  `crafter_cart_synced` record (`{ [product id]: quantity }`); lines added / whose quantity changed after that are set to
+  that quantity with `/cart/add.js { items, replace: true }` (not added), a line removed from `cart` is dropped on the
+  server too with `/cart/change.js { quantity: 0 }`, and unchanged lines are not sent (changes made on the server / another
+  device are kept). Running again does not change the result. The `cart` key is no longer deleted (it stays as the theme
+  cart); `crafter_cart_coupon` is still tried once and removed. A 4xx rejection counts that state as synced; on a network /
+  server error it is retried on the next page. `replace` requires storefront PR 730 (backend `/cart/merge`
+  `strategy: 'latest'` for customers, backend PR 729); an old storefront ignores the field and adds quantities.
+- localStorage store: when a synced cart (one with a record) is emptied, the `cart` key becomes `'[]'` instead of being
+  deleted, so emptying is reflected in the server cart too.
 
-### Eklenenler
-- `CART_SYNCED_KEY` (`'crafter_cart_synced'`), `legacyCartDiff(legacy, synced)` ve `LegacyCart` tipi.
+### Added
+- `CART_SYNCED_KEY` (`'crafter_cart_synced'`), `legacyCartDiff(legacy, synced)` and the `LegacyCart` type.
 
-### Belgeler
-- Wiki: `03-store-and-cart.md` localStorage sepetinin eşitlenmesi (#434).
-- Wiki: `17-theme-runtime.md` (tema v2: `crafter:ready`, sunucu sepeti, `money`, `localization`, `sections.render`,
-  `checkout()`, DOM olayları). Wiki hızlı başlangıcı tema v2 kuralına göre güncellendi (tema SDK'yı kendisi yüklemez).
-- Örnek: `examples/06-theme-v2-section.liquid` (sunucuda çizilen mini sepet bölümü, `{% schema %}`, SDK ile güncelleme).
-- README: v1 / harici sayfa için sürümlü CDN adresi 1.5.2.
+### Docs
+- Wiki: `03-store-and-cart.md` syncing the localStorage cart (#434).
+- Wiki: `17-theme-runtime.md` (theme v2: `crafter:ready`, server cart, `money`, `localization`, `sections.render`,
+  `checkout()`, DOM events). The wiki quick start was updated for the theme v2 rule (the theme does not load the SDK itself).
+- Example: `examples/06-theme-v2-section.liquid` (a server-rendered mini cart section, `{% schema %}`, updates with the SDK).
+- README: versioned CDN URL 1.5.2 for v1 / external pages.
 
 ## 1.5.1 — 2026-11-24
 
-Kupon düzeltmesi (#476): storefront sepetinde kupon eklenirken hemen doğrulanır, sepet indirim ve toplamı döner, eski
-(geçersiz) kupon sepette takılı kalmaz. Kıran değişiklik yok; yeni alanlar isteğe bağlıdır.
+Coupon fix (#476): in the storefront cart a coupon is validated right when it is added, the cart returns the discount and
+total, and an old (invalid) coupon no longer gets stuck in the cart. No breaking changes; the new fields are optional.
 
-### Eklenenler
-- `CartState.discount` (kupon indirimi), `CartState.total` (`subtotal - discount`, en az 0; ikisi de mağaza para
-  biriminde), `CartState.couponDetails` (`code`, `type`: `'percentage' | 'fixed' | 'free_product'`, `value`,
-  `freeProductId`) ve `CartState.couponRemoved` (`{ code, reason }`: saklı kupon geçersizleşip düşürüldüyse bir kez).
-  Alanlar `ServerCartResponse` / `cartStateFromServer` ile aktarılır; eski storefront göndermezse indirim 0, toplam ara
-  toplam, diğerleri null. localStorage sepeti kuponu doğrulayamaz: indirim 0, toplam ara toplam, `couponDetails` null.
-- `crafter.cart.removeCoupon()` (`setCoupon(null)` ile aynı).
-- `CrafterCouponError` (`minCartValue`), `CouponErrorType`, `COUPON_ERROR_TYPES`, `isCouponError(error)`. Kupon hata
-  kodları: `coupon_not_found`, `coupon_inactive`, `coupon_usage_limit_reached`, `coupon_already_used_by_user`,
+### Added
+- `CartState.discount` (coupon discount), `CartState.total` (`subtotal - discount`, at least 0; both in the store
+  currency), `CartState.couponDetails` (`code`, `type`: `'percentage' | 'fixed' | 'free_product'`, `value`,
+  `freeProductId`) and `CartState.couponRemoved` (`{ code, reason }`: once, if a stored coupon became invalid and was dropped).
+  The fields are passed through `ServerCartResponse` / `cartStateFromServer`; if an old storefront does not send them, the
+  discount is 0, the total is the subtotal and the others are null. The localStorage cart cannot validate coupons: discount 0,
+  total = subtotal, `couponDetails` null.
+- `crafter.cart.removeCoupon()` (same as `setCoupon(null)`).
+- `CrafterCouponError` (`minCartValue`), `CouponErrorType`, `COUPON_ERROR_TYPES`, `isCouponError(error)`. Coupon error
+  codes: `coupon_not_found`, `coupon_inactive`, `coupon_usage_limit_reached`, `coupon_already_used_by_user`,
   `coupon_not_assigned_to_user`, `coupon_cart_total_below_minimum` (`details.minCartValue`),
   `coupon_invalid_for_product`, `coupon_invalid_type`.
-- Tipler: `CartCouponDetails`, `CartCouponRemovedNote`.
+- Types: `CartCouponDetails`, `CartCouponRemovedNote`.
 
-### Düzeltilenler
-- `crafter.cart.setCoupon(code)`: storefront `POST /cart/coupon.js` geçersiz kuponu 422 ile reddeder; SDK bunu
-  `CrafterCouponError` (`type`, sayfanın dilinde `message`, `details`) olarak fırlatır, sepet değişmez ve
-  `crafter:cart:updated` yayılmaz.
-- Eski localStorage sepetinin taşınması: kupon yalnızca sunucu kabul ederse taşınır. Kupon adımı 4xx ile reddedilirse
-  taşınan satırlar kaybolmaz, kupon düşer, `cart` ve `crafter_cart_coupon` anahtarları silinir ve dönen sepette
-  `couponRemoved` bildirilir. Ağ / sunucu hatasında anahtarlar eskisi gibi korunur.
+### Fixed
+- `crafter.cart.setCoupon(code)`: the storefront `POST /cart/coupon.js` rejects an invalid coupon with 422; the SDK throws
+  it as a `CrafterCouponError` (`type`, `message` in the page language, `details`), the cart does not change and
+  `crafter:cart:updated` is not emitted.
+- Migrating the old localStorage cart: the coupon is moved only if the server accepts it. If the coupon step is rejected
+  with a 4xx, the migrated lines are not lost, the coupon is dropped, the `cart` and `crafter_cart_coupon` keys are removed
+  and `couponRemoved` is reported in the returned cart. On a network / server error the keys are kept as before.
 
 ## 1.5.0 — 2026-11-24
 
-Hibrit sepet (#434): storefront içinde sepet sunucudadır. Ziyaretçi giriş yapana kadar storefront'un imzalı çerezinde,
-giriş/kayıtta hesaba katılır ve cihazlar arası aynı kalır. `crafter.cart` API'si, `CartState` ve `crafter:cart:updated`
-olayı değişmez. Kıran değişiklik yok.
+Hybrid cart (#434): inside the storefront the cart lives on the server. Until the visitor logs in it is kept in the
+storefront's signed cookie, it is merged into the account on login/sign-up, and it stays the same across devices. The
+`crafter.cart` API, `CartState` and the `crafter:cart:updated` event are unchanged. No breaking changes.
 
-### Eklenenler
-- Sayfa bağlamında `routes.cartApi` (ör. `'/cart'`) varsa `crafter.cart` storefront uçlarını kullanır: `GET /cart.js`,
+### Added
+- If the page context has `routes.cartApi` (e.g. `'/cart'`), `crafter.cart` uses the storefront endpoints: `GET /cart.js`,
   `POST /cart/add.js`, `/cart/change.js`, `/cart/clear.js`, `/cart/coupon.js` (`credentials: 'same-origin'`,
-  `X-Crafter-Locale`). Fiyat gönderilmez; tutarları sunucu güncel üründen hesaplar. Bağlam yoksa (headless) ya da eski
-  storefront'ta localStorage deposu eskisi gibi çalışır; `CartModuleDeps.store` verilirse her zaman o kullanılır.
-- Eski localStorage sepetinin bir kerelik taşınması: sunucu sepeti boşsa satırlar (id + adet) ve kupon gönderilir,
-  ardından `cart` / `crafter_cart_coupon` anahtarları silinir. Ağ hatasında korunur, sonraki sayfada tekrar denenir.
-- `CartState.removed[]` ve `CartState.adjusted[]`: satıştan kalkan / tükenen ürünler ve stoğa göre düşürülen adetler
-  (sunucu bir kez bildirir).
-- Sekmeler arası eşitleme: değişiklikte `crafter_cart_sync` yazılır, diğer sekmeler sepeti yeniden okuyup olay yayar.
+  `X-Crafter-Locale`). No price is sent; the server calculates amounts from the current product. Without a context
+  (headless) or on an old storefront the localStorage store works as before; if `CartModuleDeps.store` is given, it is always used.
+- One-time migration of the old localStorage cart: if the server cart is empty, the lines (id + quantity) and the coupon are
+  sent, then the `cart` / `crafter_cart_coupon` keys are removed. Kept on a network error and retried on the next page.
+- `CartState.removed[]` and `CartState.adjusted[]`: products taken off sale / sold out and quantities reduced to match stock
+  (the server reports them once).
+- Cross-tab sync: `crafter_cart_sync` is written on change, other tabs re-read the cart and emit the event.
 - `crafter.cart.isServerBacked`, `CartBackend`, `LocalCartBackend`, `ServerCartBackend`, `ServerCartClient`,
-  `CART_SYNC_KEY`, `cartStateFromServer`; `CartAddInput.options` (varyant / seçenek).
-- Sepet uç hataları `CrafterError` olarak döner: `cart_product_unavailable` (409), `cart_full` (422),
-  `cart_unavailable` (503, ağ hatası dahil).
+  `CART_SYNC_KEY`, `cartStateFromServer`; `CartAddInput.options` (variant / options).
+- Cart endpoint errors are returned as `CrafterError`: `cart_product_unavailable` (409), `cart_full` (422),
+  `cart_unavailable` (503, including network errors).
 
 ## 1.4.0 — 2026-11-23
 
-Temalarda SDK zorunlu (#447): storefront her v2 tema sayfasına SDK'nın tarayıcı derlemesini sürümlü adresten ekler ve
-sayfa bağlamıyla kendiliğinden başlatır. Temalar sepet, para, dil ve checkout kodunu kendisi yazmaz. Kıran değişiklik yok.
+SDK required in themes (#447): the storefront adds the SDK's browser build from a versioned URL to every v2 theme page and
+starts it with the page context by itself. Themes do not write their own cart, money, language or checkout code. No breaking changes.
 
-### Eklenenler
-- Otomatik başlatma: IIFE derlemesi `window.__CRAFTER_CONTEXT__` görürse `window.Crafter` hazır örnek olur
-  (`mode: 'storefront'`, bağlamın `apiBase` / `websiteId` değerleri) ve `document`'a `crafter:ready` yayılır. Bağlam yoksa
-  `window.Crafter` eskisi gibi sınıftır. `Crafter.autoInit(window)`, `crafter.context`, `CrafterConfig.context`, `CrafterPageContext`.
+### Added
+- Auto-start: if the IIFE build sees `window.__CRAFTER_CONTEXT__`, `window.Crafter` becomes a ready instance
+  (`mode: 'storefront'`, the context's `apiBase` / `websiteId` values) and `crafter:ready` is dispatched on `document`. Without a
+  context `window.Crafter` stays the class as before. `Crafter.autoInit(window)`, `crafter.context`, `CrafterConfig.context`, `CrafterPageContext`.
 - `crafter.cart`: `get()`, `add(product, quantity?)`, `update(id, quantity)`, `remove(id)`, `clear()`, `setCoupon(code)`;
-  hepsi `CartState` (`items`, `itemCount`, `subtotal` mağaza para biriminde, `currency`, `coupon`) döner. Depo localStorage
-  `cart` / `crafter_cart_coupon` (storefront checkout'uyla aynı biçim). İç `CartStore` arayüzü: hibrit sepet (#434) gelince
-  sunucu deposu takılır, API değişmez. Başka sekmedeki değişiklik de olay yayar.
+  all return `CartState` (`items`, `itemCount`, `subtotal` in the store currency, `currency`, `coupon`). The store is localStorage
+  `cart` / `crafter_cart_coupon` (same format as the storefront checkout). Internal `CartStore` interface: when the hybrid cart (#434)
+  arrives, a server store is plugged in and the API does not change. A change in another tab also emits the event.
 - `crafter.money`: `format(amount, { convert?, currency?, locale? })`, `convert(amount)`, `currency`, `storeCurrency`, `rate`.
-  Mağaza tutarı bağlamın kuruyla müşterinin para birimine çevrilir (para biriminin hanesine yuvarlanır), sayfanın dilinde
-  biçimlenir; bağlam ya da kur yoksa mağaza para birimi.
-- `crafter.localization`: `get()` ve `set({ language?, currency? }, { returnTo?, reload? })` (`POST /localization`, form alanları);
-  `crafter:localization:changed` olayı.
-- `crafter.sections.render(ids, { url?, swap? })`: `?sections=` ucundan HTML alır, `#crafter-section-<id>` sarmalayıcılarını değiştirir.
-- `crafter.checkout({ purpose?, amount?, navigate? })`: `/checkout?purpose=cart` adresine gider (önizleme parametreleri korunur).
-- `crafter.dom.on(name, fn)` / `emit`: `document` üzerinde `crafter:<ad>` olayları. Olay yolu: `cart:updated`, `localization:changed`.
+  The store amount is converted to the customer's currency with the context rate (rounded to the currency's decimals) and
+  formatted in the page language; the store currency if there is no context or rate.
+- `crafter.localization`: `get()` and `set({ language?, currency? }, { returnTo?, reload? })` (`POST /localization`, form fields);
+  the `crafter:localization:changed` event.
+- `crafter.sections.render(ids, { url?, swap? })`: fetches HTML from the `?sections=` endpoint and replaces the `#crafter-section-<id>` wrappers.
+- `crafter.checkout({ purpose?, amount?, navigate? })`: goes to `/checkout?purpose=cart` (preview parameters are kept).
+- `crafter.dom.on(name, fn)` / `emit`: `crafter:<name>` events on `document`. Event bus: `cart:updated`, `localization:changed`.
 - `Crafter.version` / `SDK_VERSION`.
 
 ## 1.3.0 — 2026-11-23
 
-Ödeme para birimini sunucu belirler (#421); müşteri para biriminde fiyat gösterimi ve kilitli kur teklifiyle ödeme (#424, #426). Müşteri para biriminde ödeme isteğe bağlıdır; mevcut çağrılar aynı şekilde çalışır.
+The server decides the payment currency (#421); price display in the customer currency and payment with a locked rate quote (#424, #426). Paying in the customer currency is optional; existing calls work the same way.
 
-### Eklenenler
-- `payments.quote({ kind, currency?, amount | sepet alanları })`: kilitli kur teklifi (`POST /payment/quote`); `payment:quoted` olayı.
-- `cart.checkout()` ve `payments.initiate()`: `quoteId` alanı ve isteğe bağlı `{ useCustomerCurrency: true, customerCurrency? }`. Teklif alınır, ödeme `quoteId` ile başlar; süresi dolan / uyuşmayan / bulunamayan teklif bir kez yenilenir; `customer_currency_not_allowed` olursa ödeme mağaza para biriminde başlar (`customerCurrencyDisabled: true`). Yardımcı: `payWithQuote`.
-- `crafter.currencies.context()` (`GET /payment/currencies`) ve `crafter.currencies.convert(amounts)` (`POST /payment/currencies/convert`).
-- Tipler: `PresentmentQuote`, `PresentmentQuoteRequest`, `PaymentPresentment`, `CustomerCurrencyContext`, `CurrencyConversion`, `CustomerCurrencyOptions`; ödeme yanıtında ve `stripe` oturumunda `presentment`.
+### Added
+- `payments.quote({ kind, currency?, amount | cart fields })`: locked rate quote (`POST /payment/quote`); the `payment:quoted` event.
+- `cart.checkout()` and `payments.initiate()`: the `quoteId` field and an optional `{ useCustomerCurrency: true, customerCurrency? }`. A quote is fetched and payment starts with `quoteId`; an expired / mismatched / missing quote is renewed once; on `customer_currency_not_allowed` payment starts in the store currency (`customerCurrencyDisabled: true`). Helper: `payWithQuote`.
+- `crafter.currencies.context()` (`GET /payment/currencies`) and `crafter.currencies.convert(amounts)` (`POST /payment/currencies/convert`).
+- Types: `PresentmentQuote`, `PresentmentQuoteRequest`, `PaymentPresentment`, `CustomerCurrencyContext`, `CurrencyConversion`, `CustomerCurrencyOptions`; `presentment` in the payment response and in the `stripe` session.
 - `formatMoney(amount, currency, locale?)` (Intl; `Crafter.utils.formatMoney`).
 - `PaymentErrorType`: `payment_currency_mismatch`, `payment_currency_unsupported` (`CrafterPaymentProviderError`), `customer_currency_not_allowed`, `presentment_quote_*`.
 
-### Değişenler
-- `cart.checkout()` artık varsayılan `currency: 'TRY'` göndermez; `currency` verilmezse alan gönderilmez ve sunucu mağaza para birimini kullanır. TRY mağazalarda davranış aynıdır; TRY dışı mağazalarda eski varsayılan backend'de 400 `payment_currency_mismatch` döneceği için bu bir düzeltmedir.
-- README, wiki ve örneklerde sabit 'TL' yerine `formatMoney` kullanıldı.
+### Changed
+- `cart.checkout()` no longer sends a default `currency: 'TRY'`; if `currency` is not given the field is not sent and the server uses the store currency. Behavior is the same for TRY stores; for non-TRY stores the old default would return 400 `payment_currency_mismatch` from the backend, so this is a fix.
+- README, wiki and examples use `formatMoney` instead of a hard-coded 'TL'.
 
 ## 1.2.0 — 2026-11-20
 
-Ödeme modülü satıcı LLC akışına (CrafterPayments + Stripe Payment Element) uyarlandı (TASK-256). TR akışı (PayTR, Shopier, KuveytTürk, CrafterPayments TR) değişmedi. Kıran değişiklik yok; tüm değişiklikler eklemedir.
+The payment module was adapted to the seller LLC flow (CrafterPayments + Stripe Payment Element) (TASK-256). The TR flow (PayTR, Shopier, KuveytTürk, CrafterPayments TR) is unchanged. No breaking changes; all changes are additive.
 
-### Eklenenler
-- `payments.initiate()` ve `cart.checkout()` yanıtlarına `stripe` (`clientSecret`, `publishableKey`, `amount`, `currency`, `tax`), `tax` (vergi kırılımı) ve `paymentId` alanları eklendi. Ham backend alanları korunur.
-- `CrafterConfig.stripePublishableKey`: backend publishable key döndürmezse kullanılır.
-- `payments.getStatus(paymentId)` ve `payments.waitForResult(paymentId, options?)`: ödeme ve teslimat durumu (`deliveryStatus`: `PENDING` / `DELIVERED` / `NEEDS_REVIEW` / `REFUNDED`, `outcome`).
-- `payments.getTopUpPolicy(websiteId?)`: bakiye yükleme limitleri, ödenmiş / bonus bakiye, `showTerms` bayrağı; `topUpMaxAmount()` yardımcısı.
-- Tipli hatalar: `CrafterOutOfStockError` (`productIds`), `CrafterBalanceTopUpError` (`reason`, `limits`), `CrafterPaymentProviderError` (`retryable`); `isOutOfStockError`, `isBalanceTopUpError`, `isPaymentProviderError`, `PaymentErrorType`.
-- `CrafterError.type`: backend hata kodu (ErrorType).
-- `cart.checkout()` ve `payments.initiate()`: `billingCountry`, `billingPostalCode` alanları ve isteğe bağlı `{ legalTerms }` (sözleşme onay başlıkları).
-- `payment:status` olayı.
-- `npm test` (node:test, sıfır bağımlılık) ve ödeme modülü birim testleri.
-- `examples/05-llc-checkout.html`: Stripe test kartıyla LLC checkout örneği.
+### Added
+- `stripe` (`clientSecret`, `publishableKey`, `amount`, `currency`, `tax`), `tax` (tax breakdown) and `paymentId` fields were added to the `payments.initiate()` and `cart.checkout()` responses. Raw backend fields are kept.
+- `CrafterConfig.stripePublishableKey`: used if the backend does not return a publishable key.
+- `payments.getStatus(paymentId)` and `payments.waitForResult(paymentId, options?)`: payment and delivery status (`deliveryStatus`: `PENDING` / `DELIVERED` / `NEEDS_REVIEW` / `REFUNDED`, `outcome`).
+- `payments.getTopUpPolicy(websiteId?)`: balance top-up limits, paid / bonus balance, the `showTerms` flag; the `topUpMaxAmount()` helper.
+- Typed errors: `CrafterOutOfStockError` (`productIds`), `CrafterBalanceTopUpError` (`reason`, `limits`), `CrafterPaymentProviderError` (`retryable`); `isOutOfStockError`, `isBalanceTopUpError`, `isPaymentProviderError`, `PaymentErrorType`.
+- `CrafterError.type`: backend error code (ErrorType).
+- `cart.checkout()` and `payments.initiate()`: `billingCountry`, `billingPostalCode` fields and an optional `{ legalTerms }` (terms consent headers).
+- The `payment:status` event.
+- `npm test` (node:test, zero dependencies) and unit tests for the payment module.
+- `examples/05-llc-checkout.html`: an LLC checkout example with a Stripe test card.
 
-### Değişenler (uyumlu)
-- `cart.checkout()` dönüş tipi `any` yerine `CheckoutPaymentResponse` (index imzalı; mevcut kod derlenmeye devam eder).
-- `'cart:checkout'` olay yükü `CheckoutPaymentResponse` olarak tiplendi.
-- `CrafterError.fromResponse()` bilinen ödeme hata kodlarında alt sınıf döndürür; `instanceof CrafterError` doğru kalır.
+### Changed (compatible)
+- The `cart.checkout()` return type is `CheckoutPaymentResponse` instead of `any` (index-signed; existing code keeps compiling).
+- The `'cart:checkout'` event payload is typed as `CheckoutPaymentResponse`.
+- `CrafterError.fromResponse()` returns a subclass for known payment error codes; `instanceof CrafterError` stays true.

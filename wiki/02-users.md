@@ -1,38 +1,38 @@
-# 👤 Kullanıcılar & Profil Modülü (`crafter.users`)
+# 👤 Users & Profile Module (`crafter.users`)
 
-Kullanıcı profil bilgilerini çekme, hafif bakiye sorgulama, bakiye transferi, profil duvarı mesajları, hesap 2FA güvenlik ayarları ve Discord hesap bağlantılarını yönetir.
+Handles fetching user profile info, lightweight balance lookups, balance transfers, profile wall messages, account 2FA security settings and Discord account links.
 
 ---
 
-## 📌 Metotlar ve Kullanım Örnekleri
+## 📌 Methods and Usage Examples
 
 ### 1. `getProfile(userId?)`
-Kullanıcının detaylı profil bilgilerini getirir.
+Fetches the user's detailed profile info.
 
-* **HTTP Rota:** `GET /v2/users/:userId`
-* **Varsayılan Parametre:** `'me'` (Oturum açmış kullanıcı).
-* **Kullanıcı Adı İle Sorgulama:** `'@kullanici_adi'` formatı desteklenir.
-* **Dönüş:** `UserProfile` (`id, username, email, balance, credit, role: { name, color }, avatar, playTime, averagePlayTime, twoFactorEnabled, isOnline, likes, comments, createdAt`)
-* **Örnek Kullanım:**
+* **HTTP Route:** `GET /v2/users/:userId`
+* **Default parameter:** `'me'` (the logged-in user).
+* **Lookup by username:** the `'@username'` format is supported.
+* **Returns:** `UserProfile` (`id, username, email, balance, credit, role: { name, color }, avatar, playTime, averagePlayTime, twoFactorEnabled, isOnline, likes, comments, createdAt`)
+* **Example usage:**
   ```javascript
   // Kendi profilim
   const myProfile = await crafter.users.getProfile('me');
-  console.log('Rütbem:', myProfile.role?.name, 'Oynama Sürem:', myProfile.playTime);
+  console.log('My rank:', myProfile.role?.name, 'My playtime:', myProfile.playTime);
 
-  // Başka bir oyuncunun profili
-  const player = await crafter.users.getByUsername('oyuncu_adi');
+  // Another player's profile
+  const player = await crafter.users.getByUsername('player_name');
   ```
 
 ---
 
-### 2. `getBalance(userId?)` (Hızlı & Hafif Bakiye)
-Tam profil nesnesini çekmeden yalnızca bakiye ve para birimini çeken optimize edilmiş hafif uç nokta.
+### 2. `getBalance(userId?)` (Fast & Lightweight Balance)
+An optimized lightweight endpoint that fetches only the balance and currency without the full profile object.
 
-* **HTTP Rota:** `GET /v2/users/:userId/balance`
-* **Dönüş:** `{ userId: string, username: string, balance: number, currency: string }`
-* **Örnek Kullanım:**
+* **HTTP Route:** `GET /v2/users/:userId/balance`
+* **Returns:** `{ userId: string, username: string, balance: number, currency: string }`
+* **Example usage:**
   ```javascript
-  // Header'daki bakiye kutusunu doldururken:
+  // When filling the balance box in the header:
   const data = await crafter.users.getBalance('me');
   document.querySelector('#header-balance').innerText = `${data.balance} ${data.currency}`;
   ```
@@ -40,36 +40,36 @@ Tam profil nesnesini çekmeden yalnızca bakiye ve para birimini çeken optimize
 ---
 
 ### 3. `updateProfile(data, userId?)`
-Kullanıcının kendi e-posta adresini günceller (Backend güvenlik politikası gereği self-update'te sadece e-posta güncellenebilir).
+Updates the user's own email address (per the backend security policy, only the email can be changed in a self-update).
 
-* **HTTP Rota:** `PUT /v2/users/:userId`
-* **Girdi:** `{ email: string }`
-* **Örnek Kullanım:**
+* **HTTP Route:** `PUT /v2/users/:userId`
+* **Input:** `{ email: string }`
+* **Example usage:**
   ```javascript
   await crafter.users.updateProfile({
-    email: 'yeni-eposta@example.com'
+    email: 'new-email@example.com'
   });
   ```
 
 ---
 
-### 4. `sendBalance(params)` (Bakiye Transferi)
-Başka bir oyuncuya site bakiyesi gönderir.
+### 4. `sendBalance(params)` (Balance Transfer)
+Sends site balance to another player.
 
-* **HTTP Rota:** `POST /v2/users/:userId/balance/send`
-* **Girdi:**
+* **HTTP Route:** `POST /v2/users/:userId/balance/send`
+* **Input:**
   ```typescript
   interface SendBalanceParams {
-    targetUserId: string; // Hedef oyuncunun ID'si veya '@kullanici_adi'
+    targetUserId: string; // Target player's ID or '@username'
     amount: number;
-    userId?: string;      // Gönderen ('me')
+    userId?: string;      // Sender ('me')
   }
   ```
-* **Dönüş:**
+* **Returns:**
   ```json
   {
     "success": true,
-    "message": "Bakiye transferi tamamlandı.",
+    "message": "Balance transfer completed.",
     "transfer": {
       "from": { "userId": "...", "oldBalance": 250, "newBalance": 150 },
       "to": { "userId": "...", "oldBalance": 20, "newBalance": 120 },
@@ -77,23 +77,23 @@ Başka bir oyuncuya site bakiyesi gönderir.
     }
   }
   ```
-* **Örnek Kullanım:**
+* **Example usage:**
   ```javascript
   const res = await crafter.users.sendBalance({
     targetUserId: '@Alex',
     amount: 50
   });
-  alert(`${res.transfer.amount} kredi başarıyla transfer edildi!`);
+  alert(`${res.transfer.amount} credits transferred!`);
   ```
 
 ---
 
 ### 5. `changePassword(data, userId?)`
-Hesap şifresini değiştirir.
+Changes the account password.
 
-* **HTTP Rota:** `POST /v2/users/:userId/change-password`
-* **Girdi:** `{ currentPassword: string, newPassword: string }`
-* **Örnek Kullanım:**
+* **HTTP Route:** `POST /v2/users/:userId/change-password`
+* **Input:** `{ currentPassword: string, newPassword: string }`
+* **Example usage:**
   ```javascript
   await crafter.users.changePassword({
     currentPassword: 'EskiSifrem123!',
@@ -103,13 +103,13 @@ Hesap şifresini değiştirir.
 
 ---
 
-## 💬 Profil Duvarı (Wall)
+## 💬 Profile Wall
 
 ### 6. `getWall(userId)`
-Bir oyuncunun profil duvarındaki mesajları ve verilen yanıtları listeler.
+Lists the messages and replies on a player's profile wall.
 
-* **HTTP Rota:** `GET /v2/users/:userId/wall`
-* **Örnek:**
+* **HTTP Route:** `GET /v2/users/:userId/wall`
+* **Example:**
   ```javascript
   const messages = await crafter.users.getWall('target-user-id');
   messages.forEach(msg => {
@@ -118,27 +118,27 @@ Bir oyuncunun profil duvarındaki mesajları ve verilen yanıtları listeler.
   ```
 
 ### 7. `postWallMessage(userId, content)` & `replyWallMessage(userId, messageId, content)`
-Kullanıcının duvarına mesaj veya var olan mesaja yanıt gönderir.
+Posts a message to the user's wall or a reply to an existing message.
 
-* **HTTP Rota:** `POST /v2/users/:userId/wall` ve `POST /v2/users/:userId/wall/:msgId/reply`
-* **Örnek:**
+* **HTTP Route:** `POST /v2/users/:userId/wall` and `POST /v2/users/:userId/wall/:msgId/reply`
+* **Example:**
   ```javascript
-  // Duvara yeni mesaj yaz:
-  await crafter.users.postWallMessage('target-user-id', 'Tebrikler güzel oyundu!');
+  // Post a new message to the wall:
+  await crafter.users.postWallMessage('target-user-id', 'Congrats, good game!');
 
-  // Var olan mesaja cevap ver:
-  await crafter.users.replyWallMessage('target-user-id', 'msg-123', 'Teşekkürler!');
+  // Reply to an existing message:
+  await crafter.users.replyWallMessage('target-user-id', 'msg-123', 'Thanks!');
   ```
 
 ---
 
-## 🛡️ İki Aşamalı Doğrulama (2FA) Ayarları
+## 🛡️ Two-Factor Authentication (2FA) Settings
 
 ### 8. `get2FaStatus()`
-Kullanıcının aktif 2FA durumunu, yöntemlerini ve kalan kurtarma kodlarını sorgular.
+Looks up the user's active 2FA status, methods and remaining recovery codes.
 
-* **HTTP Rota:** `GET /v2/users/me/2fa/status`
-* **Dönüş:**
+* **HTTP Route:** `GET /v2/users/me/2fa/status`
+* **Returns:**
   ```typescript
   interface TwoFactorStatusResponse {
     enabled: boolean;
@@ -154,43 +154,43 @@ Kullanıcının aktif 2FA durumunu, yöntemlerini ve kalan kurtarma kodlarını 
 
 ### 9. Google Authenticator Kurulumu
 ```javascript
-// 1. QR Kodunu ve gizli anahtarı al:
+// 1. Get the QR code and the secret key:
 const setup = await crafter.users.setupAuthenticator();
 document.querySelector('#qr-image').src = setup.qrCodeUrl;
 
-// 2. Uygulamadaki 6 haneli kodu girerek aktifleştir:
+// 2. Enable it by entering the 6-digit code from the app:
 const res = await crafter.users.enableAuthenticator('123456');
-console.log('Kurtarma kodlarınız:', res.recoveryCodes);
+console.log('Your recovery codes:', res.recoveryCodes);
 ```
 
 ### 10. `disable2Fa(data?)`
-2FA korumasını devre dışı bırakır.
+Disables 2FA protection.
 
-* **HTTP Rota:** `POST /v2/users/me/2fa/disable`
-* **Girdi (Opsiyonel):** `{ password?: string, method?: 'authenticator' | 'email' | 'discord' }`
+* **HTTP Route:** `POST /v2/users/me/2fa/disable`
+* **Input (optional):** `{ password?: string, method?: 'authenticator' | 'email' | 'discord' }`
 ```javascript
-// Tüm 2FA yöntemlerini kapatmak için:
+// To turn off all 2FA methods:
 await crafter.users.disable2Fa({ password: 'MevcutSifrem123!' });
 
-// Yalnızca belirli bir yöntemi kapatmak için:
+// To turn off only a specific method:
 await crafter.users.disable2Fa({ method: 'email' });
 ```
 
 ---
 
-## 🎮 Discord Hesap Bağlantısı
+## 🎮 Discord Account Link
 
 ### 11. `getDiscordStatus()` & `unlinkDiscord()`
-* **HTTP Rota:** `GET /v2/users/me/discord/status` & `POST /v2/users/me/discord/unlink`
-* **Örnek:**
+* **HTTP Route:** `GET /v2/users/me/discord/status` & `POST /v2/users/me/discord/unlink`
+* **Example:**
   ```javascript
   const discord = await crafter.users.getDiscordStatus();
   if (discord.isLinked) {
-    console.log('Bağlı Discord Hesabı:', discord.discordUsername);
+    console.log('Linked Discord account:', discord.discordUsername);
   } else {
-    console.log('Discord bağlı değil.');
+    console.log('Discord is not linked.');
   }
 
-  // Bağlantıyı koparmak için:
+  // To unlink:
   await crafter.users.unlinkDiscord();
   ```

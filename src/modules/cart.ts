@@ -20,58 +20,58 @@ import {
 } from './cart-server';
 import { DomEvents } from '../core/dom-events';
 
-/** Sepete eklenecek ürün; tema genelde `data-*` özniteliklerinden verir */
+/** Product to add to the cart; themes usually pass it from `data-*` attributes */
 export interface CartAddInput {
   id: string | number;
   name?: string;
-  /** Birim fiyat, mağaza para biriminde. Storefront sepetinde gönderilmez: fiyatı sunucu hesaplar. */
+  /** Unit price in the store currency. Not sent for the storefront cart: the server calculates the price. */
   price?: number | string;
   discountType?: string | null;
   discountValue?: number | string | null;
   image?: string | null;
   images?: string[];
-  /** Varyant / seçenekler (storefront sepeti) */
+  /** Variant / options (storefront cart) */
   options?: Record<string, string> | null;
 }
 
-/** Sepet satırı: depodaki alanlar + hesaplananlar (mağaza para biriminde) */
+/** Cart line: stored fields + calculated ones (in the store currency) */
 export interface CartLine extends StoredCartLine {
-  /** İlk görsel; yoksa null */
+  /** First image; null if none */
   image: string | null;
-  /** İndirim uygulanmış birim fiyat */
+  /** Unit price with the discount applied */
   unitPrice: number;
   lineTotal: number;
 }
 
 export interface CartState {
   items: CartLine[];
-  /** Toplam adet */
+  /** Total quantity */
   itemCount: number;
-  /** Ara toplam, mağaza para biriminde; gösterim için `crafter.money.format(cart.subtotal)` */
+  /** Subtotal in the store currency; for display use `crafter.money.format(cart.subtotal)` */
   subtotal: number;
-  /** Mağaza para birimi (sayfa bağlamından); bilinmiyorsa boş */
+  /** Store currency (from the page context); empty if unknown */
   currency: string;
   coupon: string | null;
   /**
-   * Kupon indirimi, mağaza para biriminde (#476); kupon yoksa 0. localStorage sepeti kuponu doğrulayamaz: her zaman 0.
+   * Coupon discount in the store currency (#476); 0 without a coupon. The localStorage cart cannot validate coupons: always 0.
    */
   discount?: number;
-  /** Ödenecek tutar: `subtotal - discount` (en az 0), mağaza para biriminde (#476) */
+  /** Amount to pay: `subtotal - discount` (at least 0), in the store currency (#476) */
   total?: number;
-  /** Geçerli kuponun ayrıntısı (#476): `code`, `type`, `value`, `freeProductId`; kupon yoksa (ya da localStorage) null */
+  /** Details of the valid coupon (#476): `code`, `type`, `value`, `freeProductId`; null without a coupon (or with localStorage) */
   couponDetails?: CartCouponDetails | null;
   /**
-   * Storefront sepeti (#476): saklı kupon geçersizleştiği için düşürüldüyse bir kez bildirilir (`code`, `reason`:
-   * `CouponErrorType` kodu, ör. `coupon_cart_total_below_minimum`); yoksa null
+   * Storefront cart (#476): reported once if a stored coupon was dropped because it became invalid (`code`, `reason`:
+   * a `CouponErrorType` code, e.g. `coupon_cart_total_below_minimum`); null otherwise
    */
   couponRemoved?: CartCouponRemovedNote | null;
-  /** Storefront sepeti (#434): satıştan kalkan / tükenen ürün düştüyse bir kez bildirilir */
+  /** Storefront cart (#434): reported once if a product that was taken off sale / sold out was dropped */
   removed?: CartRemovedNote[];
-  /** Storefront sepeti (#434): adet stoğa göre düşürüldüyse bir kez bildirilir */
+  /** Storefront cart (#434): reported once if a quantity was reduced to match stock */
   adjusted?: CartAdjustedNote[];
 }
 
-/** Sepetin işlemleri; `crafter.cart` bunlara devreder (localStorage ya da storefront sunucusu) */
+/** Cart operations; `crafter.cart` delegates to these (localStorage or the storefront server) */
 export interface CartBackend {
   get(): Promise<CartState>;
   add(product: CartAddInput, quantity: number): Promise<CartState>;
@@ -79,27 +79,27 @@ export interface CartBackend {
   remove(id: string): Promise<CartState>;
   clear(): Promise<CartState>;
   setCoupon(code: string | null): Promise<CartState>;
-  /** Başka sekmede değişince çağrılır; aboneliği kaldıran fonksiyon döner */
+  /** Called when it changes in another tab; returns a function that unsubscribes */
   subscribe(onChange: () => void): () => void;
 }
 
 export interface CartModuleDeps {
-  /** Sepet deposu (localStorage 'cart' biçimi). Verilirse her zaman bu depo kullanılır. */
+  /** Cart store (localStorage 'cart' format). If given, this store is always used. */
   store?: CartStore;
   /**
-   * Storefront sepet uçları (#434): bağlamın `routes.cartApi` değeri (ör. '/cart'). Verilirse sepet sunucudadır
-   * (ziyaretçide imzalı çerez, giriş yapınca hesap); yoksa localStorage.
+   * Storefront cart endpoints (#434): the context's `routes.cartApi` value (e.g. '/cart'). If given, the cart lives on the server
+   * (a signed cookie for visitors, the account once logged in); otherwise localStorage.
    */
   cartApi?: string | null;
-  /** Storefront sepetinde ürün adlarının dili */
+  /** Language of product names in the storefront cart */
   locale?: () => string | undefined;
-  /** Testler için */
+  /** For tests */
   fetchImpl?: typeof fetch;
   dom?: DomEvents;
   storeCurrency?: () => string;
 }
 
-/** İndirim uygulanmış birim fiyat: 'percentage' yüzde, diğer tipler sabit tutar (checkout ile aynı kural) */
+/** Unit price with the discount applied: 'percentage' is a percentage, other types are a fixed amount (same rule as checkout) */
 export function discountedUnitPrice(line: Pick<StoredCartLine, 'price' | 'discountType' | 'discountValue'>): number {
   const price = Number(line.price) || 0;
   const discount = Number(line.discountValue) || 0;
@@ -111,7 +111,7 @@ export function discountedUnitPrice(line: Pick<StoredCartLine, 'price' | 'discou
 
 const MAX_QUANTITY = 999;
 
-/** localStorage sepeti (#447): headless kullanım ve sepet uçları olmayan sayfalar */
+/** localStorage cart (#447): headless use and pages without cart endpoints */
 export class LocalCartBackend implements CartBackend {
   constructor(private store: CartStore, private storeCurrency: () => string) {}
 
@@ -122,7 +122,7 @@ export class LocalCartBackend implements CartBackend {
       return { ...line, image: line.images?.[0] || null, unitPrice, lineTotal: unitPrice * line.quantity };
     });
     const subtotal = items.reduce((sum, line) => sum + line.lineTotal, 0);
-    // Kupon burada doğrulanamaz: indirimi checkout hesaplar
+    // The coupon cannot be validated here: checkout calculates the discount
     return {
       items,
       itemCount: items.reduce((sum, line) => sum + line.quantity, 0),
@@ -192,7 +192,7 @@ export class LocalCartBackend implements CartBackend {
   }
 }
 
-/** Sunucu yanıtı → `CartState` (tutarlar mağaza para biriminde, sunucu hesaplar) */
+/** Server response → `CartState` (amounts in the store currency, calculated by the server) */
 export function cartStateFromServer(cart: ServerCartResponse, fallbackCurrency = ''): CartState {
   return {
     items: cart.items.map((line) => ({
@@ -213,7 +213,7 @@ export function cartStateFromServer(cart: ServerCartResponse, fallbackCurrency =
   };
 }
 
-/** Storefront sepeti (#434): `/cart.js` ve `/cart/*.js` uçları; fiyat gönderilmez */
+/** Storefront cart (#434): `/cart.js` and `/cart/*.js` endpoints; no price is sent */
 export class ServerCartBackend implements CartBackend {
   constructor(private client: ServerCartClient, private storeCurrency: () => string) {}
 
@@ -264,7 +264,7 @@ export class CartModule {
     this.payments = new PaymentsModule(http, events, options);
     this.dom = deps.dom ?? new DomEvents(events);
     const storeCurrency = deps.storeCurrency ?? (() => '');
-    // Açık depo verildiyse o; storefront bağlamı sepet uçlarını bildiriyorsa sunucu; değilse localStorage
+    // An explicit store if given; the server if the storefront context announces cart endpoints; otherwise localStorage
     this.backend =
       !deps.store && typeof deps.cartApi === 'string' && deps.cartApi.trim()
         ? new ServerCartBackend(
@@ -272,7 +272,7 @@ export class CartModule {
             storeCurrency
           )
         : new LocalCartBackend(deps.store ?? new LocalStorageCartStore(), storeCurrency);
-    // Başka sekmedeki değişiklik bu sayfada da `cart:updated` yayar
+    // A change in another tab also emits `cart:updated` on this page
     this.backend.subscribe(() => {
       void this.get()
         .then((cart) => this.dom.emit('cart:updated', cart))
@@ -280,28 +280,28 @@ export class CartModule {
     });
   }
 
-  /** Sepet sunucuda mı (storefront sepet uçları) */
+  /** Whether the cart lives on the server (storefront cart endpoints) */
   public get isServerBacked(): boolean {
     return this.backend instanceof ServerCartBackend;
   }
 
-  // ===================== Sepet içeriği (#447, #434) =====================
+  // ===================== Cart contents (#447, #434) =====================
 
-  /** Sepetin güncel hali */
+  /** Current state of the cart */
   public async get(): Promise<CartState> {
     return this.backend.get();
   }
 
-  /** Ürünü ekler; sepette varsa adedi artar. `crafter:cart:updated` yayar. */
+  /** Adds the product; if it is already in the cart the quantity increases. Emits `crafter:cart:updated`. */
   public async add(product: CartAddInput, quantity = 1): Promise<CartState> {
     if (product?.id === undefined || product.id === null || product.id === '') {
-      throw new TypeError('[Crafter SDK] cart.add: ürün id gerekli');
+      throw new TypeError('[Crafter SDK] cart.add: product id is required');
     }
     const amount = Math.min(MAX_QUANTITY, Math.max(1, Math.floor(Number(quantity) || 1)));
     return this.emit(this.backend.add(product, amount));
   }
 
-  /** Satırın adedini ayarlar; 0 ya da altı satırı siler */
+  /** Sets the line's quantity; 0 or less removes the line */
   public async update(id: string | number, quantity: number): Promise<CartState> {
     const next = Math.min(MAX_QUANTITY, Math.floor(Number(quantity) || 0));
     return this.emit(this.backend.update(String(id), next));
@@ -311,22 +311,22 @@ export class CartModule {
     return this.emit(this.backend.remove(String(id)));
   }
 
-  /** Sepeti ve kuponu boşaltır */
+  /** Empties the cart and the coupon */
   public async clear(): Promise<CartState> {
     return this.emit(this.backend.clear());
   }
 
   /**
-   * Kuponu uygular; null / boş kaldırır. Storefront sepetinde sunucu hemen doğrular (#476): geçerliyse `discount`,
-   * `total`, `couponDetails` dolu döner; geçersizse `CrafterCouponError` (HTTP 422; `type`: `CouponErrorType`,
-   * `message` sayfanın dilinde, `details.minCartValue`) fırlatılır, sepet değişmez ve `crafter:cart:updated` yayılmaz.
-   * localStorage sepeti kuponu doğrulayamaz: kodu saklar, indirimi checkout hesaplar.
+   * Applies the coupon; null / empty removes it. In the storefront cart the server validates it right away (#476): if valid,
+   * `discount`, `total` and `couponDetails` are returned filled; if invalid a `CrafterCouponError` (HTTP 422; `type`: `CouponErrorType`,
+   * `message` in the page language, `details.minCartValue`) is thrown, the cart does not change and `crafter:cart:updated` is not emitted.
+   * The localStorage cart cannot validate coupons: it stores the code and checkout calculates the discount.
    */
   public async setCoupon(code: string | null): Promise<CartState> {
     return this.emit(this.backend.setCoupon(code ? String(code).trim() || null : null));
   }
 
-  /** Kuponu kaldırır (`setCoupon(null)`) */
+  /** Removes the coupon (`setCoupon(null)`) */
   public async removeCoupon(): Promise<CartState> {
     return this.setCoupon(null);
   }
@@ -337,7 +337,7 @@ export class CartModule {
     return cart;
   }
 
-  // ===================== Ödeme =====================
+  // ===================== Payment =====================
 
   /**
    * Complete purchase using user balance.
@@ -360,25 +360,25 @@ export class CartModule {
   /**
    * Pay the cart at a provider. The charged amount is the storefront total.
    * Balance is not credited and the top-up multiplier is not applied.
-   * Satıcı LLC + CrafterPayments iken yanıtta `stripe` (clientSecret, publishableKey, vergi kırılımı) bulunur.
-   * Stok yetersizse `CrafterOutOfStockError` (HTTP 409, `productIds`) fırlatılır.
-   * Para birimini sunucu belirler; `currency` verilmezse gönderilmez. `{ useCustomerCurrency: true }` ile önce kilitli
-   * kur teklifi alınır ve ödeme müşteri para biriminde başlatılır (bkz. `payWithQuote`).
+   * When the seller is an LLC with CrafterPayments, the response includes `stripe` (clientSecret, publishableKey, tax breakdown).
+   * If stock is insufficient a `CrafterOutOfStockError` (HTTP 409, `productIds`) is thrown.
+   * The server decides the currency; if `currency` is not given it is not sent. With `{ useCustomerCurrency: true }` a locked
+   * rate quote is fetched first and payment starts in the customer currency (see `payWithQuote`).
    * POST /payment/checkout
    */
   public async checkout(data: PurchaseDto & {
     providerId: string;
     websiteId: string;
     provider?: string;
-    /** Yalnızca teklifin para birimi (`quoteId` ile); verilmezse sunucu mağaza para birimini kullanır */
+    /** Only the quote's currency (with `quoteId`); if not given the server uses the store currency */
     currency?: string;
     /** Kilitli kur teklifi (`payments.quote`) */
     quoteId?: string;
     paymentDetails?: Record<string, any>;
     user: { name: string; email: string; phone?: string; address?: string };
-    /** Alıcının ülkesi (ISO 3166-1 alpha-2); satıcı LLC iken Stripe Tax vergi konumu */
+    /** Buyer's country (ISO 3166-1 alpha-2); the Stripe Tax location when the seller is an LLC */
     billingCountry?: string;
-    /** ABD / Kanada için posta kodu (Stripe Tax) */
+    /** Postal code for the US / Canada (Stripe Tax) */
     billingPostalCode?: string;
   }, options: { legalTerms?: LegalTermsConsent } & CustomerCurrencyOptions = {}): Promise<CheckoutPaymentResponse> {
     const coupon = data.coupon || (data as any).couponCode || undefined;
@@ -388,7 +388,7 @@ export class CartModule {
         payload.quoteId = quote.quoteId;
         payload.currency = quote.currency;
       } else if (options.useCustomerCurrency) {
-        // Teklifsiz ödeme mağaza para biriminde: para birimini sunucu belirler
+        // A payment without a quote is in the store currency: the server decides the currency
         delete payload.quoteId;
         delete payload.currency;
       }

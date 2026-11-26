@@ -43,14 +43,14 @@ export interface CrafterConfig {
   onTokenChange?: (token: string | null) => void;
 
   /**
-   * Stripe publishable key (pk_test_... / pk_live_...). Satıcı LLC iken Payment Element için kullanılır.
-   * Backend ödeme yanıtında anahtar döndürürse o önceliklidir. Gizli değildir.
+   * Stripe publishable key (pk_test_... / pk_live_...). Used for the Payment Element when the seller is an LLC.
+   * If the backend returns a key in the payment response, that one takes precedence. Not secret.
    */
   stripePublishableKey?: string;
 
   /**
-   * Sayfa bağlamı (#447): storefront'un `window.__CRAFTER_CONTEXT__` nesnesi. Para gösterimi, dil seçimi ve
-   * checkout adresi buradan okunur. Tema sayfalarında SDK kendiliğinden verir.
+   * Page context (#447): the storefront's `window.__CRAFTER_CONTEXT__` object. Money display, language choice and the
+   * checkout URL are read from it. On theme pages the SDK provides it by itself.
    */
   context?: import('../core/context').CrafterPageContext;
 }
@@ -64,7 +64,7 @@ export interface CrafterApiError {
   statusCode: number;
   message: string | string[];
   error?: string;
-  /** Backend hata kodu (ErrorType), ör. 'out_of_stock' */
+  /** Backend error code (ErrorType), e.g. 'out_of_stock' */
   type?: string;
   details?: Record<string, any>;
 }
@@ -562,99 +562,99 @@ export interface InitiatePaymentDto {
   amount: number;
   providerId: string;
   /**
-   * Para birimini sunucu belirler (mağaza para birimi). Yalnızca kilitli teklifin (`quoteId`) para birimi
-   * gönderilebilir; başka bir değer 400 `payment_currency_mismatch` döner. Verilmezse alan gönderilmez.
+   * The server decides the currency (the store currency). Only the locked quote's (`quoteId`) currency
+   * may be sent; any other value returns 400 `payment_currency_mismatch`. If not given the field is not sent.
    */
   currency?: string;
-  /** Kilitli kur teklifi (`payments.quote`); verilmezse ödeme mağaza para biriminde */
+  /** Locked rate quote (`payments.quote`); if not given, payment is in the store currency */
   quoteId?: string;
   websiteId?: string;
   user: InitiatePaymentUser;
-  /** Alıcının ülkesi (ISO 3166-1 alpha-2); satıcı LLC iken Stripe Tax vergi konumu */
+  /** Buyer's country (ISO 3166-1 alpha-2); the Stripe Tax location when the seller is an LLC */
   billingCountry?: string;
-  /** ABD / Kanada için posta kodu (Stripe Tax) */
+  /** Postal code for the US / Canada (Stripe Tax) */
   billingPostalCode?: string;
   [key: string]: any;
 }
 
-/** Backend'in ödeme başlatma yanıt türü. `stripe`: satıcı LLC + CrafterPayments (Payment Element). */
+/** Backend payment initiation response type. `stripe`: seller LLC + CrafterPayments (Payment Element). */
 export type PaymentSessionType = 'iframe' | 'redirect' | 'kuveytturk_init' | 'stripe' | (string & {});
 
-/** Stripe Tax vergi satırı (ülke / eyalet, vergi türü, oran ve tutar). */
+/** Stripe Tax line (country / state, tax type, rate and amount). */
 export interface PaymentTaxLine {
   country: string | null;
   state: string | null;
   /** 'vat' | 'sales_tax' | 'gst' | 'hst' | 'pst' | 'qst' ... */
   taxType: string | null;
-  /** Yüzde olarak oran (ör. 19 = %19) */
+  /** Rate as a percentage (e.g. 19 = 19%) */
   rate: number;
   amount: number;
 }
 
-/** Vergi kırılımı ve toplam (yalnızca backend `subtotal` döndürdüğünde, yani Stripe Tax hesaplandığında). */
+/** Tax breakdown and total (only when the backend returns `subtotal`, i.e. when Stripe Tax was calculated). */
 export interface PaymentTaxBreakdown {
-  /** Vergi hariç tutar */
+  /** Amount excluding tax */
   subtotal: number;
-  /** Toplam vergi */
+  /** Total tax */
   taxAmount: number;
-  /** Tahsil edilecek toplam (vergi dahil) */
+  /** Total to charge (including tax) */
   total: number;
   currency: string;
   lines: PaymentTaxLine[];
 }
 
 /**
- * Satıcı LLC iken CrafterPayments ödemesi: Stripe Payment Element ile sayfa içinde tamamlanır.
- * Stripe.js SDK'ya gömülü değildir; tema geliştiricisi kendisi yükler (bkz. wiki/07-payments.md).
+ * CrafterPayments payment when the seller is an LLC: completed on the page with the Stripe Payment Element.
+ * Stripe.js is not bundled in the SDK; the theme developer loads it (see wiki/07-payments.md).
  */
 export interface StripePaymentSession {
   paymentId: string;
-  /** PaymentIntent client secret'ı: `stripe.elements({ clientSecret })` */
+  /** PaymentIntent client secret: `stripe.elements({ clientSecret })` */
   clientSecret: string;
   /**
-   * Stripe publishable key. Backend yanıtında varsa oradan, yoksa `CrafterConfig.stripePublishableKey`'den gelir.
-   * İkisi de yoksa null'dır (tema kendi anahtarını kullanmalı).
+   * Stripe publishable key. From the backend response if present, otherwise from `CrafterConfig.stripePublishableKey`.
+   * null if neither exists (the theme must use its own key).
    */
   publishableKey: string | null;
-  /** Tahsil edilecek toplam (vergi dahil) */
+  /** Total to charge (including tax) */
   amount: number;
   currency: string;
   merchantOid?: string;
-  /** Stripe Tax kırılımı; backend vergi bilgisi döndürmediyse null */
+  /** Stripe Tax breakdown; null if the backend returned no tax info */
   tax: PaymentTaxBreakdown | null;
-  /** Müşteri para biriminde ödemede mağaza tutarı ve kur; mağaza para biriminde ödemede yok */
+  /** Store amount and rate for a payment in the customer currency; absent for a payment in the store currency */
   presentment?: PaymentPresentment;
 }
 
-/** Kur teklifi türü: sepet ödemesi ya da bakiye yükleme */
+/** Rate quote kind: cart payment or balance top-up */
 export type PresentmentQuoteKind = 'cart' | 'top_up';
 
-/** `POST /payment/quote` gövdesi */
+/** `POST /payment/quote` body */
 export interface PresentmentQuoteRequest {
   /** Verilmezse `CrafterConfig.websiteId` */
   websiteId?: string;
   kind: PresentmentQuoteKind;
-  /** Müşterinin seçtiği para birimi (öneri); sunucu ayara ve ülkeye göre belirler */
+  /** Currency chosen by the customer (a suggestion); the server decides by settings and country */
   currency?: string;
-  /** kind = top_up: yükleme tutarı (mağaza para biriminde) */
+  /** kind = top_up: top-up amount (in the store currency) */
   amount?: number;
-  /** kind = cart: `cart.checkout` ile aynı sepet alanları */
+  /** kind = cart: the same cart fields as `cart.checkout` */
   coupon?: string;
   productIds?: string[];
   items?: { productId: string; quantity: number }[];
   quantities?: Record<string, number>;
 }
 
-/** Kilitli kur teklifi (~30 dk geçerli); ödeme `quoteId` ile başlatılır */
+/** Locked rate quote (valid ~30 min); payment starts with `quoteId` */
 export interface PresentmentQuote {
   quoteId: string;
   kind: PresentmentQuoteKind;
   storeCurrency: string;
   storeAmount: number;
-  /** Müşterinin ödeyeceği para birimi ve tutar */
+  /** Currency and amount the customer will pay */
   currency: string;
   amount: number;
-  /** 1 mağaza birimi = rate müşteri birimi (kur payı dahil) */
+  /** 1 store unit = rate customer units (including the FX margin) */
   rate: number;
   baseRate?: number;
   markupPercent?: number;
@@ -664,7 +664,7 @@ export interface PresentmentQuote {
   expiresAt: string;
 }
 
-/** Ödeme yanıtındaki müşteri para birimi bilgisi (teklifle ödemede) */
+/** Customer currency info in the payment response (when paying with a quote) */
 export interface PaymentPresentment {
   quoteId: string;
   currency: string;
@@ -675,33 +675,33 @@ export interface PaymentPresentment {
   storeAmount: number;
 }
 
-/** Müşteri para biriminin ayarı: otomatik, seçili para birimleri ya da kapalı */
+/** Customer currency setting: automatic, selected currencies or disabled */
 export type CustomerCurrencyMode = 'auto' | 'selected' | 'off' | (string & {});
 
-/** Müşteri para birimi nasıl belirlendi: seçim (çerez / parametre), ülke ya da mağaza para birimi */
+/** How the customer currency was chosen: selection (cookie / parameter), country or store currency */
 export type CustomerCurrencySource = 'choice' | 'country' | 'store' | (string & {});
 
-/** `GET /payment/currencies`: fiyat gösterimi ve para birimi seçicisi için bağlam */
+/** `GET /payment/currencies`: context for price display and the currency selector */
 export interface CustomerCurrencyContext {
   storeCurrency: string;
   mode: CustomerCurrencyMode;
-  /** Mağaza para biriminden başka para birimi gösterilebiliyor mu */
+  /** Whether currencies other than the store currency can be shown */
   enabled: boolean;
-  /** Seçicideki para birimleri; mağaza para birimi ilk sırada */
+  /** Currencies in the selector; the store currency comes first */
   currencies: string[];
-  /** Müşterinin para birimi */
+  /** The customer's currency */
   currency: string;
   source: CustomerCurrencySource;
-  /** 1 mağaza birimi = rate müşteri birimi (kur payı dahil) */
+  /** 1 store unit = rate customer units (including the FX margin) */
   rate: number;
-  /** İzinli para birimlerinin kurları (seçicide anında çeviri için) */
+  /** Rates of the allowed currencies (for instant conversion in the selector) */
   rates: Record<string, number>;
   markupPercent: number;
   rateDate: string | null;
   rateSource: string | null;
 }
 
-/** `POST /payment/currencies/convert`: tutarlar istek sırasıyla müşteri para biriminde */
+/** `POST /payment/currencies/convert`: amounts in the customer currency, in request order */
 export interface CurrencyConversion {
   storeCurrency: string;
   currency: string;
@@ -713,13 +713,13 @@ export interface CurrencyConversion {
 }
 
 /**
- * Müşteri para biriminde ödeme (isteğe bağlı): önce kilitli teklif alınır, ödeme `quoteId` ile başlatılır.
- * Teklifin süresi dolduysa / sepet değiştiyse bir kez yeni teklif alınır; mağaza müşteri para birimini
- * kapattıysa (`customer_currency_not_allowed`) ödeme mağaza para biriminde başlatılır.
+ * Payment in the customer currency (optional): a locked quote is fetched first, payment starts with `quoteId`.
+ * If the quote expired / the cart changed, a new quote is fetched once; if the store disabled the customer
+ * currency (`customer_currency_not_allowed`), payment starts in the store currency.
  */
 export interface CustomerCurrencyOptions {
   useCustomerCurrency?: boolean;
-  /** Teklif için para birimi önerisi; verilmezse sunucu çerezden / ülkeden belirler */
+  /** Currency suggestion for the quote; if not given the server decides from the cookie / country */
   customerCurrency?: string;
 }
 
@@ -730,7 +730,7 @@ export interface InitiatePaymentResponse {
   paymentUrl?: string;
   success?: boolean;
   type?: PaymentSessionType;
-  /** Backend'in ham alanı; SDK ayrıca `paymentId` olarak da döndürür */
+  /** The backend's raw field; the SDK also returns it as `paymentId` */
   payment_id?: string;
   payment_url?: string;
   redirectUrl?: string;
@@ -740,86 +740,86 @@ export interface InitiatePaymentResponse {
   merchant_oid?: string;
   amount?: number | string;
   currency?: string;
-  /** type = stripe: PaymentIntent client secret'ı */
+  /** type = stripe: PaymentIntent client secret */
   clientSecret?: string;
-  /** type = stripe: vergi hariç tutar, toplam vergi ve satırlar (ham alanlar) */
+  /** type = stripe: amount excluding tax, total tax and lines (raw fields) */
   subtotal?: number;
   taxAmount?: number;
   taxes?: PaymentTaxLine[];
-  /** Sepet bakiyeyle tamamen ödendiyse ürünler teslim edilmiştir; sağlayıcıya gidilmez */
+  /** If the cart was paid entirely with balance, the items have been delivered; no provider redirect */
   delivered?: boolean;
-  /** SDK tarafından eklenir: type = stripe ise Payment Element için gereken her şey, değilse yok */
+  /** Added by the SDK: everything needed for the Payment Element if type = stripe, absent otherwise */
   stripe?: StripePaymentSession;
-  /** SDK tarafından eklenir: vergi kırılımı (yoksa null) */
+  /** Added by the SDK: tax breakdown (null if absent) */
   tax?: PaymentTaxBreakdown | null;
   /**
-   * Teklifle (müşteri para biriminde) ödemede mağaza tutarı ve kur. Bu durumda `amount`, `currency`, `subtotal`,
-   * `taxAmount` ve `taxes` müşteri para birimindedir.
+   * Store amount and rate when paying with a quote (in the customer currency). In this case `amount`, `currency`, `subtotal`,
+   * `taxAmount` and `taxes` are in the customer currency.
    */
   presentment?: PaymentPresentment;
-  /** SDK tarafından eklenir (`useCustomerCurrency`): müşteri para birimi kapalı, ödeme mağaza para biriminde */
+  /** Added by the SDK (`useCustomerCurrency`): the customer currency is disabled, payment is in the store currency */
   customerCurrencyDisabled?: boolean;
   [key: string]: any;
 }
 
-/** Sepet ödemesi (`cart.checkout`) yanıtı; ödeme başlatma yanıtıyla aynı yapıdadır. */
+/** Cart payment (`cart.checkout`) response; same shape as the payment initiation response. */
 export type CheckoutPaymentResponse = InitiatePaymentResponse;
 
-/** Backend ödeme kaydı durumu (public durum ucu). */
+/** Backend payment record status (public status endpoint). */
 export type PaymentRecordStatus = 'PENDING' | 'COMPLETED' | 'FAILED' | 'CANCELED' | 'REFUNDED' | (string & {});
 
-/** Public durum ucunun döndürdüğü teslimat özeti; eski backend veya teslimatsız ödemede null. */
+/** Delivery summary returned by the public status endpoint; null for an old backend or a payment without delivery. */
 export type PublicDeliveryState = 'pending' | 'delivered' | 'failed' | 'refunded' | null;
 
 /**
- * Teslimat durumu (backend `deliveryStatus` değerleriyle aynı adlar).
- * - NEEDS_REVIEW: ödeme alındı ama teslimat yapılamadı / incelemede; mağaza yetkilisi müdahale etmeli.
- * - REFUNDED: ürün tükendiği için teslim edilemedi ve ödeme otomatik iade edildi.
+ * Delivery status (same names as the backend's `deliveryStatus` values).
+ * - NEEDS_REVIEW: payment received but delivery failed / is under review; a store admin must step in.
+ * - REFUNDED: could not be delivered because the product sold out, and the payment was refunded automatically.
  */
 export type PaymentDeliveryStatus = 'PENDING' | 'DELIVERED' | 'NEEDS_REVIEW' | 'REFUNDED';
 
-/** Ödeme sonrası alıcıya gösterilecek sonuç. */
+/** Result shown to the buyer after payment. */
 export type PaymentOutcome = 'processing' | 'success' | 'pending' | 'failed' | 'refunded' | 'needs_review';
 
 export interface PaymentStatusResult {
   paymentId: string;
   status: PaymentRecordStatus;
-  /** Backend'in ham teslimat özeti */
+  /** The backend's raw delivery summary */
   delivery: PublicDeliveryState;
-  /** Teslimat durumu; teslimat bilgisi yoksa null */
+  /** Delivery status; null if there is no delivery info */
   deliveryStatus: PaymentDeliveryStatus | null;
-  /** Ödeme + teslimat birleşik sonucu */
+  /** Combined payment + delivery result */
   outcome: PaymentOutcome;
-  /** Sonuç kesinleşti mi (yoklama durdurulabilir) */
+  /** Whether the result is final (polling can stop) */
   final: boolean;
 }
 
 export interface WaitForPaymentOptions {
-  /** Deneme sayısı (varsayılan 20) */
+  /** Number of attempts (default 20) */
   attempts?: number;
-  /** Denemeler arası bekleme, ms (varsayılan 1500) */
+  /** Wait between attempts, ms (default 1500) */
   intervalMs?: number;
   signal?: AbortSignal;
 }
 
-/** Site bakiyesi yükleme koşulları: `GET /payment/balance-top-up/policy` */
+/** Site balance top-up conditions: `GET /payment/balance-top-up/policy` */
 export interface BalanceTopUpPolicy {
-  /** Bakiye yükleme açık mı */
+  /** Whether balance top-up is enabled */
   enabled: boolean;
-  /** Satıcı LLC: kapalı devre bakiye kuralları ve limitler geçerli */
+  /** Seller LLC: closed-loop balance rules and limits apply */
   closedLoop: boolean;
-  /** SDK tarafından eklenir: yükleme ekranında bakiye koşul metni gösterilmeli mi (closedLoop ile aynı) */
+  /** Added by the SDK: whether the balance terms text should be shown on the top-up screen (same as closedLoop) */
   showTerms: boolean;
-  /** Mağaza para birimi */
+  /** Store currency */
   currency: string;
-  /** Tek yüklemede en fazla (USD) */
+  /** Maximum per top-up (USD) */
   maxSingleUsd: number;
-  /** Mağaza başına ödenmiş bakiye üst sınırı (USD) */
+  /** Paid balance cap per store (USD) */
   maxPaidUsd: number;
-  /** Mağaza para birimi karşılıkları; kur yoksa veya TR modunda null */
+  /** Store currency equivalents; null if there is no rate or in TR mode */
   maxSingleAmount: number | null;
   remainingAmount: number | null;
-  /** Toplam bakiye = ödenmiş + bonus */
+  /** Total balance = paid + bonus */
   balance: number;
   paidBalance: number;
   bonusBalance: number;
@@ -1177,9 +1177,9 @@ export interface CrafterEventMap {
   // ================= Store & Cart =================
   'cart:purchased': PurchaseResponse;
   'cart:checkout': CheckoutPaymentResponse;
-  /** Sepet değişti (ekle / güncelle / sil / başka sekme); `document`'ta `crafter:cart:updated` */
+  /** Cart changed (add / update / remove / another tab); `crafter:cart:updated` on `document` */
   'cart:updated': import('../modules/cart').CartState;
-  /** Dil / para birimi seçildi; `document`'ta `crafter:localization:changed` */
+  /** Language / currency chosen; `crafter:localization:changed` on `document` */
   'localization:changed': { language: string; currency: string; url: string };
   'license:verified': { valid: boolean; productId?: string; type?: string; downloadable?: boolean };
 

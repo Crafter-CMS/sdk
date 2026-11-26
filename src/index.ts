@@ -51,20 +51,20 @@ import {
   IS_HIGHLIGHT,
 } from './utils/lexical';
 
-/** `crafter.checkout()` seçenekleri */
+/** `crafter.checkout()` options */
 export interface CheckoutNavigateOptions {
-  /** 'cart' (varsayılan): sepet ödemesi; 'balance': bakiye yükleme */
+  /** 'cart' (default): cart checkout; 'balance': balance top-up */
   purpose?: 'cart' | 'balance';
-  /** Bakiye yüklemede önerilen tutar (mağaza para biriminde) */
+  /** Suggested amount for a balance top-up (in the store currency) */
   amount?: number;
-  /** false: gezinmez, yalnızca adresi döner */
+  /** false: does not navigate, only returns the URL */
   navigate?: boolean;
 }
 
-/** Headless (direct) modda varsayılan API adresi */
+/** Default API URL in headless (direct) mode */
 const DIRECT_API_BASE = 'https://api.crafter.net.tr';
 
-/** Önizleme / editör parametreleri checkout'a taşınır (tema önizlemesi doğru mağaza temasıyla açılsın) */
+/** Preview / editor parameters are carried to checkout (so the theme preview opens with the right store theme) */
 const PREVIEW_PARAMS = ['themeId', 'preview_theme_id', 'preview_ts', 'preview_token'];
 
 export class Crafter {
@@ -73,9 +73,9 @@ export class Crafter {
   public readonly config: CrafterConfig;
   public readonly http: HttpClient;
   public readonly events: EventEmitter;
-  /** `document` olayları: `crafter.dom.on('cart:updated', fn)` */
+  /** `document` events: `crafter.dom.on('cart:updated', fn)` */
   public readonly dom: DomEvents;
-  /** Sayfa bağlamı (storefront'un yazdığı `window.__CRAFTER_CONTEXT__`); yoksa null */
+  /** Page context (`window.__CRAFTER_CONTEXT__` written by the storefront); null if absent */
   public readonly context: CrafterPageContext | null;
   public readonly money: MoneyModule;
   public readonly localization: LocalizationModule;
@@ -151,7 +151,7 @@ export class Crafter {
   };
 
   constructor(config: CrafterConfig = {}) {
-    // Varsayılan adres moda göre: direct → https://api.crafter.net.tr, storefront → /api/storefront (HttpClient ile aynı kural)
+    // Default URL depends on the mode: direct → https://api.crafter.net.tr, storefront → /api/storefront (same rule as HttpClient)
     const mode = config.mode || (config.websiteId ? 'direct' : 'storefront');
     this.config = {
       mode,
@@ -172,7 +172,7 @@ export class Crafter {
     this.users = new UsersModule(this.http, this.events);
     this.store = new StoreModule(this.http, this.events);
     
-    // Storefront sepet uçları (#434) bağlamdan; yoksa (headless, eski storefront) localStorage
+    // Storefront cart endpoints (#434) from the context; otherwise (headless, old storefront) localStorage
     const cartModule = new CartModule(this.http, this.events, this.config, {
       dom: this.dom,
       storeCurrency: () => this.money.storeCurrency,
@@ -211,8 +211,8 @@ export class Crafter {
   }
 
   /**
-   * Checkout sayfasına gider (#447). Sepet için `/checkout?purpose=cart`; checkout dil önekiyle açılmaz,
-   * dili gelinen sayfadan okur. Adres sayfa bağlamından (`routes.checkout`) gelir.
+   * Goes to the checkout page (#447). `/checkout?purpose=cart` for the cart; checkout does not open with the language prefix,
+   * it reads the language from the referring page. The URL comes from the page context (`routes.checkout`).
    */
   public checkout(options: CheckoutNavigateOptions = {}): string {
     const params = new URLSearchParams();
@@ -233,9 +233,9 @@ export class Crafter {
   }
 
   /**
-   * Tarayıcı derlemesinin (IIFE) otomatik başlatması (#447). Sayfada `window.__CRAFTER_CONTEXT__` varsa
-   * `window.Crafter` bu bağlamla kurulmuş örnek olur ve `document`'a `crafter:ready` yayılır; yoksa null döner
-   * (`window.Crafter` sınıf olarak kalır, `new Crafter({...})` eskisi gibi çalışır). İkinci çağrı aynı örneği döner.
+   * Auto-start of the browser build (IIFE) (#447). If the page has `window.__CRAFTER_CONTEXT__`,
+   * `window.Crafter` becomes an instance set up with that context and `crafter:ready` is dispatched on `document`; otherwise returns null
+   * (`window.Crafter` stays the class and `new Crafter({...})` works as before). A second call returns the same instance.
    */
   public static autoInit(win: any = typeof window !== 'undefined' ? window : undefined): Crafter | null {
     const context = readPageContext(win);

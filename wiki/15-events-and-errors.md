@@ -1,119 +1,119 @@
-# ⚡ Event Bus & Hata Yönetimi
+# ⚡ Event Bus & Error Handling
 
-Crafter SDK, temaların sayfayı yenilemeden reaktif olarak arayüz güncellemesi yapabilmesi için yerleşik bir **Olay Dinleme Sistemi (Event Bus)** ve tutarlı bir **Hata Sınıfı (`CrafterError`)** içerir.
+The Crafter SDK includes a built-in **event listening system (Event Bus)** and a consistent **error class (`CrafterError`)** so themes can update the UI reactively without reloading the page.
 
 ---
 
 ## 📌 Reaktif Event Bus (`crafter.on`, `crafter.off`, `crafter.once`)
 
-Kullanıcı bir işlem yaptığında (giriş yapma, satın alma, bakiye gönderme vb.), SDK arka planda global olaylar yayınlar. Temalar bu olayları dinleyerek sepet sayısını, bakiye kutularını veya bildirim pencerelerini anında güncelleyebilir.
+When the user does something (logging in, buying, sending balance, etc.), the SDK publishes global events in the background. Themes can listen to these events to update cart counts, balance boxes or notification popups instantly.
 
-### Dinlenebilir Standart Olaylar
+### Standard Events You Can Listen To
 
-| Olay Adı | Tetiklenme Zamanı | Döndürdüğü Veri (`payload`) |
+| Event Name | When It Fires | Data Returned (`payload`) |
 | :--- | :--- | :--- |
-| **`auth:login`** | Kullanıcı başarıyla oturum açtığında | `{ token?: string }` |
-| **`auth:logout`** | Kullanıcı çıkış yaptığında | `void` |
-| **`auth:token_refreshed`** | Access token yenilendiğinde | `{ token: string }` |
-| **`user:updated`** | Kullanıcı profilini güncellediğinde | `UserProfile` |
-| **`balance:sent`** | Başka bir oyuncuya bakiye transfer edildiğinde | `SendBalanceResponse` |
-| **`wall:message_added`** | Profil duvarına yeni mesaj yazıldığında | `{ userId: string, message: WallMessage }` |
-| **`wall:reply_added`** | Profil duvarındaki mesaja yanıt verildiğinde | `{ userId: string, wallMessageId: string, reply: WallMessageReply }` |
-| **`2fa:enabled`** | 2FA aktif edildiğinde (Authenticator/Email/Discord) | `{ method: string, recoveryCodes?: string[] }` |
-| **`2fa:disabled`** | 2FA devre dışı bırakıldığında | `{ method?: string }` |
-| **`discord:linked`** | Discord hesabı bağlandığında | `{ discordId: string, discordUsername: string }` |
-| **`discord:unlinked`** | Discord hesabı bağlantısı koparıldığında | `void` |
-| **`cart:purchased`** | Mağazadan bir ürün satın alındığında | `PurchaseResponse` |
-| **`chest:item_used`** | Sandıktan bir eşya oyuna teslim edildiğinde | `{ itemId: string, response: UseChestItemResponse }` |
-| **`chest:item_gifted`**| Sandıktan bir eşya arkadaşa hediye edildiğinde | `{ targetUserId: string, itemId: string, response: GiftChestItemResponse }` |
-| **`ticket:created`** | Yeni bir destek bileti açıldığında | `Ticket` |
-| **`ticket:replied`** | Destek biletine mesaj yazıldığında | `{ ticketId: string, response: Ticket }` |
-| **`ticket:closed`** | Destek bileti kapatıldığında | `{ ticketId: string, reason?: string, response: Ticket }` |
-| **`ticket:opened`** | Destek bileti yeniden açıldığında | `{ ticketId: string, response: Ticket }` |
-| **`forum:topic_created`**| Forumda yeni konu açıldığında | `ForumTopic` |
-| **`forum:message_added`**| Forum konusuna yeni mesaj yazıldığında | `{ topicId: string, message: any }` |
-| **`forum:reply_added`** | Forum mesajına alıntı yanıt verildiğinde | `{ messageId: string, reply: any }` |
-| **`forum:topic_liked`** | Forum konusu beğenildiğinde | `{ topicId: string, likeCount?: number }` |
-| **`forum:topic_unliked`**| Forum konusundan beğeni geri çekildiğinde | `{ topicId: string, likeCount?: number }` |
-| **`post:liked`** | Bir duyuru beğenildiğinde | `LikePostResponse` |
-| **`redeem:used`** | Hediye / promosyon kodu bozdurulduğunda | `UseRedeemCodeResponse` |
-| **`report:created`** | Bir oyuncu rapor edildiğinde | `ReportResponse` |
-| **`vote:success`** | Sunucuya oy verildiğinde | `{ providerId: string, response: any }` |
-| **`form:submitted`** | Yetkili başvuru formu yollandığında | `{ formId: string, response: StaffFormApplicationResponse }` |
-| **`payment:initiated`** | Ödeme başlatıldığında (iframe/redirect) | `InitiatePaymentResponse` |
-| **`payment:checked`** | Ödeme durumu kontrol edildiğinde | `CheckPaymentResponse` |
+| **`auth:login`** | When the user signs in successfully | `{ token?: string }` |
+| **`auth:logout`** | When the user logs out | `void` |
+| **`auth:token_refreshed`** | When the access token is refreshed | `{ token: string }` |
+| **`user:updated`** | When the user updates their profile | `UserProfile` |
+| **`balance:sent`** | When balance is transferred to another player | `SendBalanceResponse` |
+| **`wall:message_added`** | When a new message is posted on a profile wall | `{ userId: string, message: WallMessage }` |
+| **`wall:reply_added`** | When a message on a profile wall gets a reply | `{ userId: string, wallMessageId: string, reply: WallMessageReply }` |
+| **`2fa:enabled`** | When 2FA is enabled (Authenticator/Email/Discord) | `{ method: string, recoveryCodes?: string[] }` |
+| **`2fa:disabled`** | When 2FA is disabled | `{ method?: string }` |
+| **`discord:linked`** | When a Discord account is linked | `{ discordId: string, discordUsername: string }` |
+| **`discord:unlinked`** | When a Discord account is unlinked | `void` |
+| **`cart:purchased`** | When a product is bought from the store | `PurchaseResponse` |
+| **`chest:item_used`** | When an item from the chest is delivered in game | `{ itemId: string, response: UseChestItemResponse }` |
+| **`chest:item_gifted`**| When an item from the chest is gifted to a friend | `{ targetUserId: string, itemId: string, response: GiftChestItemResponse }` |
+| **`ticket:created`** | When a new support ticket is opened | `Ticket` |
+| **`ticket:replied`** | When a message is posted to a support ticket | `{ ticketId: string, response: Ticket }` |
+| **`ticket:closed`** | When a support ticket is closed | `{ ticketId: string, reason?: string, response: Ticket }` |
+| **`ticket:opened`** | When a support ticket is reopened | `{ ticketId: string, response: Ticket }` |
+| **`forum:topic_created`**| When a new forum topic is opened | `ForumTopic` |
+| **`forum:message_added`**| When a new message is posted to a forum topic | `{ topicId: string, message: any }` |
+| **`forum:reply_added`** | When a forum message gets a quoted reply | `{ messageId: string, reply: any }` |
+| **`forum:topic_liked`** | When a forum topic is liked | `{ topicId: string, likeCount?: number }` |
+| **`forum:topic_unliked`**| When a like is removed from a forum topic | `{ topicId: string, likeCount?: number }` |
+| **`post:liked`** | When a post is liked | `LikePostResponse` |
+| **`redeem:used`** | When a gift / promotion code is redeemed | `UseRedeemCodeResponse` |
+| **`report:created`** | When a player is reported | `ReportResponse` |
+| **`vote:success`** | When a vote is cast for the server | `{ providerId: string, response: any }` |
+| **`form:submitted`** | When a staff application form is submitted | `{ formId: string, response: StaffFormApplicationResponse }` |
+| **`payment:initiated`** | When a payment is started (iframe/redirect) | `InitiatePaymentResponse` |
+| **`payment:checked`** | When a payment status is checked | `CheckPaymentResponse` |
 
-### Örnek Kullanım:
+### Example Usage:
 ```javascript
-// Satın alım tamamlandığında header bakiyesini otomatik güncelle
+// Update the header balance automatically when a purchase completes
 crafter.on('cart:purchased', async (order) => {
-  console.log('Satın alma başarılı:', order);
+  console.log('Purchase successful:', order);
   const data = await crafter.users.getBalance('me');
   document.querySelector('#header-balance').innerText = data.balance;
-  showToast('Satın alma başarılı! Eşyanız sandığınıza eklendi.');
+  showToast('Purchase successful! Your item was added to your chest.');
 });
 
-// Çıkış yapıldığında sayfayı yenile
+// Reload the page on logout
 crafter.on('auth:logout', () => {
   window.location.reload();
 });
 
-// Bir kerelik dinleme:
+// Listen once:
 crafter.once('auth:login', () => {
-  console.log('İlk kez giriş yapıldı!');
+  console.log('Logged in for the first time!');
 });
 ```
 
 ---
 
-## ⚠️ Hata Yönetimi (`CrafterError`)
+## ⚠️ Error Handling (`CrafterError`)
 
-Tüm HTTP hataları (400 Bad Request, 401 Unauthorized, 404 Not Found, 500 Server Error) standart bir `CrafterError` nesnesi olarak fırlatılır.
+All HTTP errors (400 Bad Request, 401 Unauthorized, 404 Not Found, 500 Server Error) are thrown as a standard `CrafterError` object.
 
-### `CrafterError` Özellikleri
+### `CrafterError` Properties
 ```typescript
 class CrafterError extends Error {
-  statusCode: number;           // HTTP durum kodu (400, 401, 404, 500 vb.)
-  message: string;              // Okunabilir hata mesajı
-  error?: string;               // Backend hata tipi (Örn: 'BAD_REQUEST')
-  details?: Record<string, any>;// Doğrulama hataları veya detaylar
+  statusCode: number;           // HTTP status code (400, 401, 404, 500, etc.)
+  message: string;              // Readable error message
+  error?: string;               // Backend error type (e.g. 'BAD_REQUEST')
+  details?: Record<string, any>;// Validation errors or details
   isCrafterError: true;
 }
 ```
 
-### Güvenli Hata Yakalama Örneği:
+### Safe Error Handling Example:
 ```javascript
 try {
   await crafter.cart.purchase({ productIds: ['prod-1'] });
 } catch (err) {
   if (err.isCrafterError) {
     if (err.statusCode === 401) {
-      alert('Lütfen önce oturum açınız.');
+      alert('Please log in first.');
       window.location.href = '/auth/login';
     } else if (err.statusCode === 400) {
-      alert('Hata: ' + err.message); // Örn: "Yetersiz bakiye"
+      alert('Error: ' + err.message); // e.g. "Insufficient balance"
     } else {
-      alert('Sunucu hatası: ' + err.message);
+      alert('Server error: ' + err.message);
     }
   } else {
-    console.error('Bilinmeyen bir hata oluştu:', err);
+    console.error('An unknown error occurred:', err);
   }
 }
 ```
 
 ---
 
-## 🌐 Çift Çalışma Modu Mimarisi (Storefront vs Direct)
+## 🌐 Dual-Mode Architecture (Storefront vs Direct)
 
-SDK ortamı otomatik olarak tanır:
+The SDK detects the environment automatically:
 
-1. **`storefront` Modu (Varsayılan):**
-   * Liquid temalarda `websiteId` belirtilmezse otomatik aktif olur.
-   * Tüm istekler aynı kök dizindeki `/api/storefront` Next.js Proxy'sine iletilir.
-   * `websiteId` alan adı (hostname) üzerinden otomatik çözülür.
-   * `crafter_token` HttpOnly çerezi otomatik olarak yönetilir.
-
+1. **`storefront` mode (default):**
+   * Enabled automatically in Liquid themes when `websiteId` is not given.
+   * All requests go to the `/api/storefront` Next.js proxy on the same origin.
+   * `websiteId` is resolved automatically from the domain (hostname).
+   * The `crafter_token` HttpOnly cookie is managed automatically.
+2. **`direct` mode (Headless / React / Vue / Mobile / Node.js):**
 2. **`direct` Modu (Headless / React / Vue / Mobile / Node.js):**
-   * Yapılandırmada `websiteId` verildiğinde otomatik aktif olur.
-   * İstekler doğrudan `https://api.crafter.net.tr/website/{v2/}:websiteId/...` adresine gider.
-   * JWT token'ı Authorization başlığıyla iletilir.
+   * Enabled automatically when `websiteId` is given in the configuration.
+   * Requests go directly to `https://api.crafter.net.tr/website/{v2/}:websiteId/...`.
+   * The JWT token is sent in the Authorization header.

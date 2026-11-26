@@ -1,8 +1,8 @@
 import { EventEmitter } from './events';
 
 /**
- * Tema olayları (#447): SDK değişiklikleri hem kendi olay yoluna (`crafter.on('cart:updated')`) hem de
- * `document` üzerine `crafter:<ad>` CustomEvent olarak yayar. Temalar SDK örneğini beklemeden dinleyebilir:
+ * Theme events (#447): the SDK emits changes both on its own event bus (`crafter.on('cart:updated')`) and as a
+ * `crafter:<name>` CustomEvent on `document`. Themes can listen without waiting for the SDK instance:
  *   document.addEventListener('crafter:cart:updated', (e) => e.detail.itemCount)
  */
 export const DOM_EVENTS = {
@@ -17,7 +17,7 @@ function targetDocument(): any {
   return typeof document !== 'undefined' ? document : undefined;
 }
 
-/** `document` üzerine `crafter:<name>` olayı; tarayıcı dışında sessizce atlanır */
+/** `crafter:<name>` event on `document`; silently skipped outside the browser */
 export function dispatchDomEvent(name: string, detail?: unknown): void {
   const doc = targetDocument();
   if (!doc || typeof doc.dispatchEvent !== 'function' || typeof CustomEvent !== 'function') return;
@@ -25,21 +25,21 @@ export function dispatchDomEvent(name: string, detail?: unknown): void {
   try {
     doc.dispatchEvent(new CustomEvent(type, { detail }));
   } catch (error) {
-    console.error(`[Crafter SDK] "${type}" olayı yayılamadı:`, error);
+    console.error(`[Crafter SDK] Could not dispatch the "${type}" event:`, error);
   }
 }
 
 export class DomEvents {
   constructor(private events: EventEmitter) {}
 
-  /** SDK olay yoluna ve `document`'a birlikte yayar */
+  /** Emits on the SDK event bus and on `document` together */
   public emit(name: string, detail?: unknown): void {
     this.events.emit(name, detail);
     dispatchDomEvent(name, detail);
   }
 
   /**
-   * `document` üzerindeki `crafter:<name>` olayını dinler; işleyici `event.detail` alır. Aboneliği kaldıran fonksiyon döner.
+   * Listens for the `crafter:<name>` event on `document`; the handler receives `event.detail`. Returns a function that unsubscribes.
    * @example crafter.dom.on('cart:updated', (cart) => badge.textContent = cart.itemCount)
    */
   public on(name: string, handler: (detail: any) => void): () => void {

@@ -1,5 +1,5 @@
-// Hibrit sepet (#434) birim testleri: storefront sepet uçları, localStorage sepetinin eşitlenmesi, sekmeler arası
-// sinyal ve hata eşlemesi. Derlenmiş paketi (dist) test eder. Bütün değerler sentetiktir.
+// Hybrid cart (#434) unit tests: storefront cart endpoints, syncing the localStorage cart, cross-tab
+// signal and error mapping. Tests the built package (dist). All values are synthetic.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -43,7 +43,7 @@ const context = {
 };
 
 function line(id, quantity, unitPrice = 10) {
-  return { key: id, id, productId: id, name: `Ürün ${id}`, slug: id, url: `/products/${id}`, price: unitPrice, unitPrice, discountType: null, discountValue: null, quantity, lineTotal: unitPrice * quantity, images: [`/${id}.png`], image: `/${id}.png`, stock: -1, options: null };
+  return { key: id, id, productId: id, name: `Product ${id}`, slug: id, url: `/products/${id}`, price: unitPrice, unitPrice, discountType: null, discountValue: null, quantity, lineTotal: unitPrice * quantity, images: [`/${id}.png`], image: `/${id}.png`, stock: -1, options: null };
 }
 
 function cartBody(items = [], extra = {}) {
@@ -73,7 +73,7 @@ function install() {
   return { storage, win };
 }
 
-/** routes: "METHOD url" → (body) => { status, body } ; sırayla tüketilen kuyruk da desteklenir */
+/** routes: "METHOD url" → (body) => { status, body } ; a queue consumed in order is also supported */
 beforeEach(() => {
   calls = [];
   routes = {};
@@ -90,7 +90,7 @@ beforeEach(() => {
   };
 });
 
-test('bağlamda routes.cartApi varsa sunucu sepeti, yoksa localStorage', async () => {
+test('server cart if the context has routes.cartApi, localStorage otherwise', async () => {
   install();
   routes['GET /cart.js'] = () => ({ body: cartBody([line('p1', 2)]) });
   const server = new Crafter({ context });
@@ -105,7 +105,7 @@ test('bağlamda routes.cartApi varsa sunucu sepeti, yoksa localStorage', async (
   assert.equal(new Crafter({ context: { ...context, routes: { ...context.routes, cartApi: '' } } }).cart.isServerBacked, false);
 });
 
-test('uç çağrıları: yöntem, adres, gövde (fiyatsız), başlıklar ve crafter:cart:updated', async () => {
+test('endpoint calls: method, URL, body (no price), headers and crafter:cart:updated', async () => {
   const { storage } = install();
   routes['GET /cart.js'] = () => ({ body: cartBody() });
   routes['POST /cart/add.js'] = (b) => ({ body: cartBody([line(b.id, b.quantity)]) });
@@ -141,19 +141,19 @@ test('uç çağrıları: yöntem, adres, gövde (fiyatsız), başlıklar ve craf
 
   assert.equal(domEvents.length, 7);
   assert.equal(domEvents[0].itemCount, 3);
-  // Değişiklik diğer sekmelere bildirilir; localStorage sepeti yazılmaz
+  // The change is signalled to other tabs; the localStorage cart is not written
   assert.ok(Number(storage.getItem(CART_SYNC_KEY)) > 0);
   assert.equal(storage.getItem(CART_STORAGE_KEY), null);
-  // GET hiç gönderilmedi (taşınacak kayıt yoktu)
+  // GET was never sent (there was no record to migrate)
   assert.equal(calls.filter((c) => c.method === 'GET').length, 0);
 });
 
-test('removed / adjusted notları CartState içinde döner', async () => {
+test('removed / adjusted notes are returned in CartState', async () => {
   install();
   routes['GET /cart.js'] = () => ({
     body: cartBody([line('p1', 3)], {
-      removed: [{ productId: 'old', key: 'old', name: 'Eski', quantity: 1, reason: 'out_of_stock' }],
-      adjusted: [{ productId: 'p1', key: 'p1', name: 'Ürün p1', from: 5, to: 3, reason: 'stock_limit' }],
+      removed: [{ productId: 'old', key: 'old', name: 'Old', quantity: 1, reason: 'out_of_stock' }],
+      adjusted: [{ productId: 'p1', key: 'p1', name: 'Product p1', from: 5, to: 3, reason: 'stock_limit' }],
     }),
   });
   const cart = await new Crafter({ context }).cart.get();
@@ -161,7 +161,7 @@ test('removed / adjusted notları CartState içinde döner', async () => {
   assert.equal(cart.adjusted[0].to, 3);
 });
 
-test('eşitleme: ilk eşitlemede localStorage satırları (replace) ve kupon gönderilir; cart kalır, kupon anahtarı silinir', async () => {
+test('sync: on the first sync the localStorage lines (replace) and the coupon are sent; cart stays, the coupon key is removed', async () => {
   const { storage } = install();
   storage.setItem(CART_STORAGE_KEY, JSON.stringify([{ id: 'p1', name: 'A', price: 99, quantity: 2 }, { id: 'p2', price: 1, quantity: 1 }, { name: 'idsiz' }]));
   storage.setItem(CART_COUPON_KEY, 'ESKI10');
@@ -178,34 +178,34 @@ test('eşitleme: ilk eşitlemede localStorage satırları (replace) ve kupon gö
   assert.deepEqual(JSON.parse(storage.getItem(CART_SYNCED_KEY)), { p1: 2, p2: 1 });
   assert.equal(storage.getItem(CART_COUPON_KEY), null);
 
-  // Taşıma sayfa başına bir kez; sonraki okuma düz GET
+  // Migration runs once per page; the next read is a plain GET
   await crafter.cart.get();
   assert.deepEqual(calls.slice(3).map((c) => `${c.method} ${c.url}`), ['GET /cart.js']);
 });
 
-test('eşitleme: eski ödenmemiş sunucu sepeti doluyken yeni localStorage seçimi kaybolmaz (#434 hata)', async () => {
+test('sync: a new localStorage selection is not lost while an old unpaid server cart is not empty (#434 bug)', async () => {
   const { storage } = install();
-  storage.setItem(CART_STORAGE_KEY, JSON.stringify([{ id: 'yeni', price: 1, quantity: 1 }]));
-  storage.setItem(CART_COUPON_KEY, 'ESKI');
-  routes['GET /cart.js'] = () => ({ body: cartBody([line('eski', 1)], { coupon: 'SUNUCU' }) });
-  routes['POST /cart/add.js'] = (b) => ({ body: cartBody([line('eski', 1), ...(b.items || [b]).map((i) => line(i.id, i.quantity))], { coupon: 'SUNUCU' }) });
+  storage.setItem(CART_STORAGE_KEY, JSON.stringify([{ id: 'fresh', price: 1, quantity: 1 }]));
+  storage.setItem(CART_COUPON_KEY, 'OLDCODE');
+  routes['GET /cart.js'] = () => ({ body: cartBody([line('stale', 1)], { coupon: 'SERVER' }) });
+  routes['POST /cart/add.js'] = (b) => ({ body: cartBody([line('stale', 1), ...(b.items || [b]).map((i) => line(i.id, i.quantity))], { coupon: 'SERVER' }) });
   const crafter = new Crafter({ context });
   const cart = await crafter.cart.get();
   assert.deepEqual(calls.map((c) => `${c.method} ${c.url}`), ['GET /cart.js', 'POST /cart/add.js']);
-  assert.deepEqual(calls[1].body, { items: [{ id: 'yeni', quantity: 1 }], replace: true });
-  assert.deepEqual(cart.items.map((i) => i.id), ['eski', 'yeni']);
-  // Sunucudaki kupon korunur, eski kupon gönderilmez ama anahtarı silinir
-  assert.equal(cart.coupon, 'SUNUCU');
+  assert.deepEqual(calls[1].body, { items: [{ id: 'fresh', quantity: 1 }], replace: true });
+  assert.deepEqual(cart.items.map((i) => i.id), ['stale', 'fresh']);
+  // The server's coupon is kept; the old coupon is not sent but its key is removed
+  assert.equal(cart.coupon, 'SERVER');
   assert.equal(storage.getItem(CART_COUPON_KEY), null);
-  assert.deepEqual(JSON.parse(storage.getItem(CART_SYNCED_KEY)), { yeni: 1 });
+  assert.deepEqual(JSON.parse(storage.getItem(CART_SYNCED_KEY)), { fresh: 1 });
 });
 
-test('eşitleme: tekrar çalışınca adetler katlanmaz; değişmeyen satır gönderilmez, aynı ürün tek satır olur', async () => {
+test('sync: running again does not double quantities; unchanged lines are not sent, the same product becomes one line', async () => {
   const { storage } = install();
   storage.setItem(CART_STORAGE_KEY, JSON.stringify([{ id: 'p1', quantity: 1 }, { id: 'p1', quantity: 2 }, { id: 'p2', quantity: 1 }]));
   let server = [];
   routes['GET /cart.js'] = () => ({ body: cartBody(server) });
-  // Storefront replace: adet verilen değere ayarlanır
+  // Storefront replace: the quantity is set to the given value
   routes['POST /cart/add.js'] = (b) => {
     for (const item of b.items) {
       const found = server.find((l) => l.id === item.id);
@@ -219,14 +219,14 @@ test('eşitleme: tekrar çalışınca adetler katlanmaz; değişmeyen satır gö
   await new Crafter({ context }).cart.get();
   assert.deepEqual(calls[1].body, { items: [{ id: 'p1', quantity: 3 }, { id: 'p2', quantity: 1 }], replace: true });
 
-  // Sonraki sayfa: cart değişmedi, istek yalnızca GET; sunucuda tükenip çıkarılan p2 geri gelmez
+  // Next page: cart unchanged, only a GET; p2, sold out and removed on the server, does not come back
   server = server.filter((l) => l.id !== 'p2');
   calls = [];
   let cart = await new Crafter({ context }).cart.get();
   assert.deepEqual(calls.map((c) => `${c.method} ${c.url}`), ['GET /cart.js']);
   assert.deepEqual(cart.items.map((i) => [i.id, i.quantity]), [['p1', 3]]);
 
-  // Kayıt yazılamamış olsa bile (iki sekme / kota) yeniden gönderim adetleri katlamaz
+  // Even if the record could not be written (two tabs / quota), a resend does not double quantities
   storage.removeItem(CART_SYNCED_KEY);
   calls = [];
   cart = await new Crafter({ context }).cart.get();
@@ -234,7 +234,7 @@ test('eşitleme: tekrar çalışınca adetler katlanmaz; değişmeyen satır gö
   assert.deepEqual(cart.items.map((i) => [i.id, i.quantity]).sort(), [['p1', 3], ['p2', 1]]);
 });
 
-test('eşitleme: eşitlemeden sonra değişen adet ayarlanır, cart\'tan çıkarılan satır sunucudan düşer', async () => {
+test('sync: a quantity changed after the sync is set, a line removed from cart is dropped on the server', async () => {
   const { storage } = install();
   storage.setItem(CART_STORAGE_KEY, JSON.stringify([{ id: 'a', quantity: 3 }, { id: 'c', quantity: 1 }]));
   storage.setItem(CART_SYNCED_KEY, JSON.stringify({ a: 1, b: 1, c: 1 }));
@@ -249,7 +249,7 @@ test('eşitleme: eşitlemeden sonra değişen adet ayarlanır, cart\'tan çıkar
   assert.deepEqual(JSON.parse(storage.getItem(CART_SYNCED_KEY)), { a: 3, c: 1 });
 });
 
-test('eşitleme: cart \'[]\' ise eşitlenen satırlar düşer; cart anahtarı yoksa satır silinmez, kayıt temizlenir', async () => {
+test('sync: if cart is \'[]\' the synced lines are dropped; without the cart key no line is removed and the record is cleared', async () => {
   let { storage } = install();
   storage.setItem(CART_STORAGE_KEY, '[]');
   storage.setItem(CART_SYNCED_KEY, JSON.stringify({ a: 1 }));
@@ -268,7 +268,7 @@ test('eşitleme: cart \'[]\' ise eşitlenen satırlar düşer; cart anahtarı yo
   assert.deepEqual(calls.map((c) => `${c.method} ${c.url}`), ['GET /cart.js']);
   assert.equal(storage.getItem(CART_SYNCED_KEY), null);
 
-  // Hiç kayıt yoksa ağ isteği yapılmaz; artakalan eşitleme kaydı silinir
+  // With no record at all no network request is made; a leftover sync record is removed
   ({ storage } = install());
   storage.setItem(CART_SYNCED_KEY, JSON.stringify({ a: 1 }));
   calls = [];
@@ -279,14 +279,14 @@ test('eşitleme: cart \'[]\' ise eşitlenen satırlar düşer; cart anahtarı yo
   assert.equal(storage.getItem(CART_SYNCED_KEY), null);
 });
 
-test('legacyCartDiff: storefront checkout ile aynı fark kuralı', () => {
+test('legacyCartDiff: same diff rule as the storefront checkout', () => {
   const legacy = { items: [{ id: 'a', quantity: 2 }, { id: 'n', quantity: 1 }], coupon: null, present: true };
   assert.deepEqual(legacyCartDiff(legacy, null), { set: legacy.items, remove: [] });
   assert.deepEqual(legacyCartDiff(legacy, new Map([['a', 2], ['x', 1]])), { set: [{ id: 'n', quantity: 1 }], remove: ['x'] });
   assert.deepEqual(legacyCartDiff({ ...legacy, present: false }, new Map([['x', 1]])).remove, []);
 });
 
-test('localStorage deposu: eşitlenmiş sepet boşaltılınca cart \'[]\' kalır', async () => {
+test('localStorage store: cart stays \'[]\' when a synced cart is emptied', async () => {
   const { storage } = install();
   const headless = new Crafter();
   await headless.cart.add({ id: 'p1', name: 'A', price: 1 });
@@ -298,10 +298,10 @@ test('localStorage deposu: eşitlenmiş sepet boşaltılınca cart \'[]\' kalır
   assert.equal(storage.getItem(CART_STORAGE_KEY), '[]');
 });
 
-test('eşitleme: ağ ya da sunucu hatasında kayıt güncellenmez; 4xx ret bu hali eşitlenmiş sayar', async () => {
+test('sync: on a network or server error the record is not updated; a 4xx rejection counts this state as synced', async () => {
   let { storage } = install();
   storage.setItem(CART_STORAGE_KEY, JSON.stringify([{ id: 'p1', price: 1, quantity: 1 }]));
-  routes['GET /cart.js'] = [new TypeError('ağ yok'), { body: cartBody() }];
+  routes['GET /cart.js'] = [new TypeError('no network'), { body: cartBody() }];
   let crafter = new Crafter({ context });
   const cart = await crafter.cart.get();
   assert.equal(cart.itemCount, 0);
@@ -322,19 +322,19 @@ test('eşitleme: ağ ya da sunucu hatasında kayıt güncellenmez; 4xx ret bu ha
   crafter = new Crafter({ context });
   await crafter.cart.get();
   assert.deepEqual(JSON.parse(storage.getItem(CART_SYNCED_KEY)), { gone: 1 });
-  // Sonraki sayfada aynı satır yeniden gönderilmez
+  // The same line is not sent again on the next page
   calls = [];
-  routes['POST /cart/add.js'] = () => assert.fail('yeniden gönderilmemeli');
+  routes['POST /cart/add.js'] = () => assert.fail('must not be sent again');
   await new Crafter({ context }).cart.get();
   assert.deepEqual(calls.map((c) => `${c.method} ${c.url}`), ['GET /cart.js']);
 });
 
-test('hata eşlemesi: CrafterError statusCode/type/details; ağ hatası cart_unavailable', async () => {
+test('error mapping: CrafterError statusCode/type/details; a network error is cart_unavailable', async () => {
   install();
   routes['POST /cart/add.js'] = [
-    { status: 409, body: { success: false, type: 'cart_product_unavailable', message: 'Satılamıyor', details: { productId: 'p1', reason: 'out_of_stock' } } },
-    { status: 422, body: { success: false, type: 'cart_full', message: 'Dolu' } },
-    new TypeError('ağ yok'),
+    { status: 409, body: { success: false, type: 'cart_product_unavailable', message: 'Not for sale', details: { productId: 'p1', reason: 'out_of_stock' } } },
+    { status: 422, body: { success: false, type: 'cart_full', message: 'Full' } },
+    new TypeError('no network'),
   ];
   const crafter = new Crafter({ context });
   await assert.rejects(() => crafter.cart.add({ id: 'p1' }), (error) => {
@@ -349,7 +349,7 @@ test('hata eşlemesi: CrafterError statusCode/type/details; ağ hatası cart_una
   assert.equal(domEvents.length, 0);
 });
 
-test('sekmeler arası: crafter_cart_sync değişince sepet yeniden okunur ve olay yayılır', async () => {
+test('cross-tab: when crafter_cart_sync changes the cart is re-read and the event is emitted', async () => {
   const { win } = install();
   routes['GET /cart.js'] = () => ({ body: cartBody([line('p1', 4)]) });
   new Crafter({ context });
@@ -365,7 +365,7 @@ test('sekmeler arası: crafter_cart_sync değişince sepet yeniden okunur ve ola
   assert.equal(domEvents.at(-1).itemCount, 4);
 });
 
-test('açık store verilirse bağlam olsa da localStorage deposu kullanılır (geriye uyum)', async () => {
+test('an explicit store uses the localStorage store even with a context (backward compatibility)', async () => {
   const { storage } = install();
   const { LocalStorageCartStore, CartModule } = await import('../dist/index.mjs');
   const crafter = new Crafter({ context });
@@ -376,9 +376,9 @@ test('açık store verilirse bağlam olsa da localStorage deposu kullanılır (g
   assert.equal(calls.length, 0);
 });
 
-// ===================== Kupon (#476) =====================
+// ===================== Coupon (#476) =====================
 
-test('kupon alanları CartState içinde döner; eski storefront yanıtında varsayılanlar', async () => {
+test('coupon fields are returned in CartState; defaults for an old storefront response', async () => {
   install();
   routes['GET /cart.js'] = [
     {
@@ -405,7 +405,7 @@ test('kupon alanları CartState içinde döner; eski storefront yanıtında vars
   assert.deepEqual(cart.couponRemoved, { code: 'MIN500', reason: 'coupon_cart_total_below_minimum' });
   assert.equal(cart.couponDetails, null);
 
-  // discount / total göndermeyen yanıt: indirim 0, toplam ara toplam
+  // A response without discount / total: discount 0, total = subtotal
   cart = await crafter.cart.get();
   assert.equal(cart.discount, 0);
   assert.equal(cart.total, 30);
@@ -413,14 +413,14 @@ test('kupon alanları CartState içinde döner; eski storefront yanıtında vars
   assert.equal(cart.couponRemoved, null);
 });
 
-test('setCoupon: 422 ret CrafterCouponError (type, message, details) olarak döner, olay yayılmaz', async () => {
+test('setCoupon: a 422 rejection is returned as CrafterCouponError (type, message, details), no event is emitted', async () => {
   install();
   routes['POST /cart/coupon.js'] = [
     {
       status: 422,
-      body: { success: false, type: 'coupon_cart_total_below_minimum', message: 'Sepet tutarı en az 500 olmalı', details: { minCartValue: 500 } },
+      body: { success: false, type: 'coupon_cart_total_below_minimum', message: 'Cart total must be at least 500', details: { minCartValue: 500 } },
     },
-    { status: 422, body: { success: false, type: 'coupon_not_found', message: 'Kupon bulunamadı' } },
+    { status: 422, body: { success: false, type: 'coupon_not_found', message: 'Coupon not found' } },
     {
       body: cartBody([line('p1', 1, 100)], {
         coupon: 'SABIT20',
@@ -437,15 +437,15 @@ test('setCoupon: 422 ret CrafterCouponError (type, message, details) olarak dön
     assert.ok(isCouponError(error));
     assert.equal(error.statusCode, 422);
     assert.equal(error.type, CouponErrorType.CART_TOTAL_BELOW_MINIMUM);
-    assert.equal(error.message, 'Sepet tutarı en az 500 olmalı');
+    assert.equal(error.message, 'Cart total must be at least 500');
     assert.equal(error.details.minCartValue, 500);
     assert.equal(error.minCartValue, 500);
     return true;
   });
-  await assert.rejects(() => crafter.cart.setCoupon('YOK'), (error) => {
+  await assert.rejects(() => crafter.cart.setCoupon('NOPE'), (error) => {
     assert.ok(isCouponError(error));
     assert.equal(error.type, 'coupon_not_found');
-    assert.equal(error.message, 'Kupon bulunamadı');
+    assert.equal(error.message, 'Coupon not found');
     assert.equal(error.minCartValue, null);
     return true;
   });
@@ -458,12 +458,12 @@ test('setCoupon: 422 ret CrafterCouponError (type, message, details) olarak dön
   assert.equal(cart.couponDetails.type, 'fixed');
   assert.equal(domEvents.length, 1);
 
-  // Kupon dışı hata isCouponError değildir
+  // A non-coupon error is not isCouponError
   assert.equal(isCouponError(new CrafterError({ statusCode: 422, type: 'cart_full', message: 'x' })), false);
   assert.ok(COUPON_ERROR_TYPES.includes('coupon_invalid_for_product'));
 });
 
-test('removeCoupon: { code: null } gönderir, kuponsuz sepet döner ve olay yayılır', async () => {
+test('removeCoupon: sends { code: null }, returns a cart without a coupon and emits the event', async () => {
   install();
   routes['POST /cart/coupon.js'] = (b) => ({ body: cartBody([line('p1', 1, 40)], { coupon: b.code }) });
   const crafter = new Crafter({ context });
@@ -473,20 +473,20 @@ test('removeCoupon: { code: null } gönderir, kuponsuz sepet döner ve olay yay�
   assert.equal(cart.discount, 0);
   assert.equal(cart.total, 40);
   assert.equal(cart.couponDetails, null);
-  // Boş kod da kaldırır
+  // An empty code also removes it
   await crafter.cart.setCoupon('   ');
   assert.deepEqual(calls.at(-1).body, { code: null });
   assert.equal(domEvents.length, 2);
 });
 
-test('taşıma: geçersiz eski kupon taşınmaz, satırlar korunur, kupon anahtarı silinir', async () => {
+test('migration: an invalid old coupon is not moved, lines are kept, the coupon key is removed', async () => {
   const { storage } = install();
   storage.setItem(CART_STORAGE_KEY, JSON.stringify([{ id: 'p1', price: 99, quantity: 2 }]));
   storage.setItem(CART_COUPON_KEY, 'ESKI_GECERSIZ');
   routes['GET /cart.js'] = [{ body: cartBody() }, { body: cartBody([line('p1', 2)]) }];
   routes['POST /cart/add.js'] = (b) => ({ body: cartBody(b.items.map((i) => line(i.id, i.quantity))) });
   routes['POST /cart/coupon.js'] = [
-    { status: 422, body: { success: false, type: 'coupon_inactive', message: 'Kupon aktif değil' } },
+    { status: 422, body: { success: false, type: 'coupon_inactive', message: 'Coupon is not active' } },
   ];
   const crafter = new Crafter({ context });
   const cart = await crafter.cart.get();
@@ -498,13 +498,13 @@ test('taşıma: geçersiz eski kupon taşınmaz, satırlar korunur, kupon anahta
   assert.equal(storage.getItem(CART_COUPON_KEY), null);
   assert.ok(Number(storage.getItem(CART_SYNC_KEY)) > 0);
 
-  // Sonraki okuma düz GET; satırlar sunucuda
+  // The next read is a plain GET; the lines are on the server
   const again = await crafter.cart.get();
   assert.equal(again.itemCount, 2);
   assert.equal(again.couponRemoved, null);
 });
 
-test('taşıma: geçerli eski kupon taşınır; kupon adımında sunucu hatası anahtarları korur', async () => {
+test('migration: a valid old coupon is moved; a server error on the coupon step keeps the keys', async () => {
   let { storage } = install();
   storage.setItem(CART_COUPON_KEY, 'GECERLI');
   routes['GET /cart.js'] = () => ({ body: cartBody([line('p1', 1, 100)]) });
@@ -536,7 +536,7 @@ test('taşıma: geçerli eski kupon taşınır; kupon adımında sunucu hatası 
   assert.equal(storage.getItem(CART_COUPON_KEY), 'GECERLI');
 });
 
-test('localStorage sepeti: indirim 0, toplam ara toplam, couponDetails null', async () => {
+test('localStorage cart: discount 0, total = subtotal, couponDetails null', async () => {
   install();
   const crafter = new Crafter();
   assert.equal(crafter.cart.isServerBacked, false);
