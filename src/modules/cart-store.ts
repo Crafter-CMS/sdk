@@ -1,7 +1,7 @@
 /**
  * localStorage sepet deposu (#447): 'cart' ve 'crafter_cart_coupon' anahtarları. Headless kullanımda ve sepet uçları
- * olmayan sayfalarda kullanılır. Storefront içinde sepet sunucudadır (#434, `cart-server.ts`); bu anahtarlar oradan
- * bir kez taşınıp silinir.
+ * olmayan sayfalarda kullanılır. Storefront içinde sepet sunucudadır (#434, `cart-server.ts`); `cart` kaydı oradan
+ * değişen satırlarıyla sunucu sepetine eşitlenir (`crafter_cart_synced` son eşitlenen hali tutar), kupon bir kez taşınır.
  */
 
 /** Depodaki satır: checkout'un okuduğu alanlar */
@@ -28,6 +28,11 @@ export interface CartStore {
 
 export const CART_STORAGE_KEY = 'cart';
 export const CART_COUPON_KEY = 'crafter_cart_coupon';
+/**
+ * Son eşitlenen localStorage sepeti (#434 düzeltme): `{ [ürün id]: adet }`. Storefront checkout'u da aynı anahtarı ve
+ * biçimi kullanır; `cart` kaydında bundan sonra değişen satırlar sunucu sepetine uygulanır.
+ */
+export const CART_SYNCED_KEY = 'crafter_cart_synced';
 
 function storage(): Storage | null {
   try {
@@ -74,6 +79,8 @@ export class LocalStorageCartStore implements CartStore {
     if (!store) return;
     try {
       if (lines.length) store.setItem(CART_STORAGE_KEY, JSON.stringify(lines));
+      // Sunucuya eşitlenmiş sepet boşaltıldıysa '[]' kalır: anahtarın yokluğu "boşaltıldı" sayılmaz, satırlar düşmezdi
+      else if (store.getItem(CART_SYNCED_KEY) !== null) store.setItem(CART_STORAGE_KEY, '[]');
       else store.removeItem(CART_STORAGE_KEY);
     } catch {
       // Gizli gezinme / kota: sepet yalnızca bu sayfada kalır

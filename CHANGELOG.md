@@ -2,7 +2,7 @@
 
 ## 1.5.2 — 2026-11-26
 
-Yayın hazırlığı (#255, #258). npm'deki son sürüm 1.1.0; 1.2.0–1.5.1 npm'e yayınlanmadı ve bu sürümle birlikte çıkar.
+Yayın hazırlığı (#255, #258) ve sepet eşitleme düzeltmesi (#434). npm'deki son sürüm 1.1.0; 1.2.0–1.5.1 npm'e yayınlanmadı ve bu sürümle birlikte çıkar.
 Kıran değişiklik yok.
 
 ### Düzeltilenler
@@ -12,7 +12,25 @@ Kıran değişiklik yok.
   (`direct` → `https://api.crafter.net.tr`, `storefront` → `/api/storefront`); `websiteId` verilip mod verilmezse
   `config.mode` de `'direct'` olur. Verilen `apiBase` aynen korunur.
 
+- Sepet eşitleme (#434): localStorage sepeti (`cart`) "sunucu sepeti doluysa at" kuralıyla siliniyordu; giriş yapmış
+  müşteride eski, ödenmemiş bir sunucu sepeti varsa oyuncunun yeni seçimi kayboluyordu. Ayrıca toplu ekleme
+  (`/cart/add.js { items }`) adetleri topladığından tekrar çalışan taşıma (iki sekme, ağ hatası sonrası) adetleri
+  katlıyordu. Artık storefront checkout'uyla aynı kural: son eşitlenen hal `crafter_cart_synced` kaydında
+  (`{ [ürün id]: adet }`) tutulur; ondan sonra eklenen / adedi değişen satırlar `/cart/add.js { items, replace: true }`
+  ile adede ayarlanır (toplanmaz), `cart`'tan çıkarılan satır `/cart/change.js { quantity: 0 }` ile sunucudan da düşer,
+  değişmeyen satır gönderilmez (sunucuda / başka cihazda yapılan değişiklik korunur). Tekrar çalışması sonucu
+  değiştirmez. `cart` anahtarı artık silinmez (tema sepeti olarak kalır); `crafter_cart_coupon` eskisi gibi bir kez
+  denenip silinir. 4xx ret o hali eşitlenmiş sayar, ağ / sunucu hatasında sonraki sayfada yeniden denenir.
+  `replace` için storefront PR 730 (müşteride backend `/cart/merge` `strategy: 'latest'`, backend PR 729) gerekir;
+  eski storefront alanı yok sayar ve adetleri toplar.
+- localStorage deposu: eşitlenmiş (kaydı olan) sepet boşaltılınca `cart` anahtarı silinmek yerine `'[]'` olur; böylece
+  boşaltma sunucu sepetine de yansır.
+
+### Eklenenler
+- `CART_SYNCED_KEY` (`'crafter_cart_synced'`), `legacyCartDiff(legacy, synced)` ve `LegacyCart` tipi.
+
 ### Belgeler
+- Wiki: `03-store-and-cart.md` localStorage sepetinin eşitlenmesi (#434).
 - Wiki: `17-theme-runtime.md` (tema v2: `crafter:ready`, sunucu sepeti, `money`, `localization`, `sections.render`,
   `checkout()`, DOM olayları). Wiki hızlı başlangıcı tema v2 kuralına göre güncellendi (tema SDK'yı kendisi yüklemez).
 - Örnek: `examples/06-theme-v2-section.liquid` (sunucuda çizilen mini sepet bölümü, `{% schema %}`, SDK ile güncelleme).

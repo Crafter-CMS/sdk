@@ -1173,6 +1173,7 @@ var PaymentsModule = class {
 // src/modules/cart-store.ts
 var CART_STORAGE_KEY = "cart";
 var CART_COUPON_KEY = "crafter_cart_coupon";
+var CART_SYNCED_KEY = "crafter_cart_synced";
 function storage() {
   try {
     return typeof localStorage !== "undefined" ? localStorage : null;
@@ -1212,6 +1213,7 @@ var LocalStorageCartStore = class {
     if (!store) return;
     try {
       if (lines.length) store.setItem(CART_STORAGE_KEY, JSON.stringify(lines));
+      else if (store.getItem(CART_SYNCED_KEY) !== null) store.setItem(CART_STORAGE_KEY, "[]");
       else store.removeItem(CART_STORAGE_KEY);
     } catch {
     }
@@ -1305,6 +1307,51 @@ function normalizeServerCart(raw) {
     ...raw?.mode === "guest" || raw?.mode === "customer" ? { mode: raw.mode } : {}
   };
 }
+var MAX_LINE_QUANTITY = 999;
+function readLegacyCart(store) {
+  const stored = store.getItem(CART_STORAGE_KEY);
+  const coupon = store.getItem(CART_COUPON_KEY) || null;
+  if (stored === null && !coupon) return null;
+  let lines = [];
+  try {
+    lines = normalizeLines(JSON.parse(stored || "[]"));
+  } catch {
+    lines = [];
+  }
+  const quantities = /* @__PURE__ */ new Map();
+  for (const line of lines) {
+    quantities.set(line.id, Math.min(MAX_LINE_QUANTITY, (quantities.get(line.id) ?? 0) + Math.min(MAX_LINE_QUANTITY, line.quantity)));
+  }
+  return { items: [...quantities].map(([id, quantity]) => ({ id, quantity })), coupon, present: stored !== null };
+}
+function readSyncedSnapshot(store) {
+  try {
+    const raw = JSON.parse(store.getItem(CART_SYNCED_KEY) || "null");
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const snapshot = /* @__PURE__ */ new Map();
+    for (const [id, quantity] of Object.entries(raw)) {
+      const value = Math.floor(Number(quantity));
+      if (id && Number.isFinite(value) && value > 0) snapshot.set(id, value);
+    }
+    return snapshot;
+  } catch {
+    return null;
+  }
+}
+function writeSyncedSnapshot(store, items) {
+  try {
+    if (items === null) store.removeItem(CART_SYNCED_KEY);
+    else store.setItem(CART_SYNCED_KEY, JSON.stringify(Object.fromEntries(items.map((item) => [item.id, item.quantity]))));
+  } catch {
+  }
+}
+function legacyCartDiff(legacy, synced) {
+  const base = synced ?? /* @__PURE__ */ new Map();
+  const current = new Set(legacy.items.map((item) => item.id));
+  const set = legacy.items.filter((item) => base.get(item.id) !== item.quantity);
+  const remove = legacy.present ? [...base.keys()].filter((id) => !current.has(id)) : [];
+  return { set, remove };
+}
 var ServerCartClient = class {
   constructor(options) {
     this.options = options;
@@ -1349,13 +1396,20 @@ var ServerCartClient = class {
     return () => window.removeEventListener("storage", listener);
   }
   /**
-   * Eski temaların localStorage sepeti (`cart`, `crafter_cart_coupon`) sayfa başına bir kez taşınır: sunucu sepeti
-   * boşsa satırlar (yalnızca id + adet), kupon yoksa kupon gönderilir; ardından anahtarlar silinir. Sunucu sepeti
-   * doluysa sunucudaki esas alınır ve anahtarlar yine silinir. Ağ / sunucu hatasında localStorage korunur (sonraki
-   * sayfada tekrar denenir); istek reddedilirse (4xx) kayıt bozuk sayılır ve silinir.
-   * Kupon yalnızca sunucu kabul ederse taşınır (#476): kupon adımı 4xx ile reddedilirse taşınan satırlar korunur,
-   * kupon düşer, iki anahtar da silinir ve dönen sepette `couponRemoved: { code, reason }` bir kez bildirilir.
-   * Dönüş: taşıma sırasında okunan son sepet (yoksa null).
+   * localStorage sepetini (`cart`: v1 temalar, SDK 1.4.0 ve öncesi, headless depo) sunucu sepetiyle eşitler; sayfa
+   * başına bir kez, ilk işlemden önce çalışır. Kural storefront checkout'uyla aynıdır (#434 düzeltme):
+   * - Son eşitlenen hal `crafter_cart_synced` kaydındadır. Ondan sonra eklenen ya da adedi değişen satır sunucuda bu
+   *   adede ayarlanır (`/cart/add.js { items, replace: true }`, toplanmaz); `cart`'tan çıkarılan satır sunucudan da
+   *   düşer (`/cart/change.js { quantity: 0 }`). Değişmeyen satır gönderilmez: sunucuda / başka cihazda yapılan
+   *   değişiklik korunur, sunucuda olup `cart`'ta hiç olmayan satırlar kalır. İlk eşitlemede bütün satırlar yenidir.
+   * - Sunucu sepeti dolu diye `cart` atılmaz (eski kural, eski ödenmemiş sunucu sepetinin yeni seçimin yerine geçmesine
+   *   yol açıyordu). Tekrar çalışması (iki sekme, ağ hatası sonrası) sonucu değiştirmez; adetler katlanmaz.
+   * - `cart` anahtarı kalır (tema sepeti); `cart` hiç yoksa sunucudan satır silinmez ve kayıt temizlenir.
+   * - Ağ / sunucu hatasında kayıt güncellenmez, sonraki sayfada yeniden denenir; 4xx ret (ör. ürün satıştan kalktı)
+   *   bu hali eşitlenmiş sayar.
+   * - Kupon (`crafter_cart_coupon`) sunucu sepetinde kupon yoksa ve sunucu kabul ederse taşınır (#476); 4xx ret
+   *   dönen sepette `couponRemoved: { code, reason }` olarak bir kez bildirilir. Denemeden sonra anahtar silinir.
+   * Dönüş: eşitleme sırasında okunan son sepet (yoksa null).
    */
   migrate() {
     if (!this.migration) this.migration = this.runMigration();
@@ -1364,54 +1418,61 @@ var ServerCartClient = class {
   async runMigration() {
     const store = storage2();
     if (!store) return null;
-    let lines;
-    let coupon;
+    let legacy;
+    let synced;
     try {
-      const raw = store.getItem(CART_STORAGE_KEY);
-      coupon = store.getItem(CART_COUPON_KEY) || null;
-      if (raw === null && !coupon) return null;
-      try {
-        lines = normalizeLines(JSON.parse(raw || "[]"));
-      } catch {
-        lines = [];
+      legacy = readLegacyCart(store);
+      synced = readSyncedSnapshot(store);
+      if (!legacy) {
+        if (synced) store.removeItem(CART_SYNCED_KEY);
+        return null;
       }
     } catch {
       return null;
     }
-    const forget = () => {
-      try {
-        store.removeItem(CART_STORAGE_KEY);
-        store.removeItem(CART_COUPON_KEY);
-      } catch {
-      }
-    };
+    const current = legacy;
     const rejected = (error) => {
       const status = error?.statusCode ?? 0;
       return status >= 400 && status < 500;
     };
+    const { set, remove } = legacyCartDiff(current, synced);
     let changed = false;
     try {
       let cart = await this.request("GET", `${this.base}.js`);
-      if (lines.length && cart.items.length === 0) {
-        cart = await this.request("POST", `${this.base}/add.js`, {
-          items: lines.map((line) => ({ id: line.id, quantity: line.quantity }))
-        });
-        changed = true;
-      }
-      if (coupon && !cart.coupon) {
-        try {
-          cart = await this.request("POST", `${this.base}/coupon.js`, { code: coupon });
+      try {
+        if (set.length) {
+          cart = await this.request("POST", `${this.base}/add.js`, { items: set, replace: true });
           changed = true;
-        } catch (error) {
-          if (!rejected(error)) throw error;
-          cart = { ...cart, couponRemoved: { code: coupon, reason: error.type || "coupon_invalid" } };
+        }
+        for (const id of remove) {
+          cart = await this.request("POST", `${this.base}/change.js`, { id, quantity: 0 });
+          changed = true;
+        }
+      } catch (error) {
+        if (!rejected(error)) throw error;
+        writeSyncedSnapshot(store, current.items);
+        if (changed) this.ping();
+        return null;
+      }
+      writeSyncedSnapshot(store, current.present ? current.items : null);
+      if (current.coupon) {
+        if (!cart.coupon) {
+          try {
+            cart = await this.request("POST", `${this.base}/coupon.js`, { code: current.coupon });
+            changed = true;
+          } catch (error) {
+            if (!rejected(error)) throw error;
+            cart = { ...cart, couponRemoved: { code: current.coupon, reason: error.type || "coupon_invalid" } };
+          }
+        }
+        try {
+          store.removeItem(CART_COUPON_KEY);
+        } catch {
         }
       }
-      forget();
       if (changed) this.ping();
       return cart;
-    } catch (error) {
-      if (rejected(error)) forget();
+    } catch {
       if (changed) this.ping();
       return null;
     }
@@ -3483,6 +3544,6 @@ var Crafter = class _Crafter {
 };
 var index_default = Crafter;
 
-export { AuthModule, CART_COUPON_KEY, CART_STORAGE_KEY, CART_SYNC_KEY, CONTEXT_GLOBAL, COUPON_ERROR_TYPES, CartModule, ChestModule, CouponErrorType, CouponsModule, Crafter, CrafterBalanceTopUpError, CrafterCouponError, CrafterError, CrafterOutOfStockError, CrafterPaymentProviderError, CurrenciesModule, DOM_EVENTS, DomEvents, EventEmitter, ForumModule, HelpcenterModule, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, LegalModule, LicensesModule, LocalCartBackend, LocalStorageCartStore, LocalizationModule, LuckPermsModule, MoneyModule, PagesModule, PaymentErrorType, PaymentsModule, PostsModule, PunishmentsModule, RedeemCodeModule, ReportsModule, SDK_VERSION, SearchModule, SectionsModule, SeoModule, ServerCartBackend, ServerCartClient, ServersModule, StaffFormsModule, StatisticsModule, StoreModule, TicketsModule, UsersModule, VoteModule, WebsiteModule, cartStateFromServer, currencyDigits, index_default as default, discountedUnitPrice, dispatchDomEvent, formatMoney, htmlToLexical, isBalanceTopUpError, isCouponError, isCrafterError, isLexicalFormat, isOutOfStockError, isPaymentProviderError, legalTermsHeaders, lexicalToHtml, lexicalToPlainText, lexicalToText, normalizeLines, normalizePaymentResponse, normalizeServerCart, parsePaymentStatus, parseTaxBreakdown, payWithQuote, readPageContext, stripLocalePrefix, toLexical, topUpMaxAmount };
+export { AuthModule, CART_COUPON_KEY, CART_STORAGE_KEY, CART_SYNCED_KEY, CART_SYNC_KEY, CONTEXT_GLOBAL, COUPON_ERROR_TYPES, CartModule, ChestModule, CouponErrorType, CouponsModule, Crafter, CrafterBalanceTopUpError, CrafterCouponError, CrafterError, CrafterOutOfStockError, CrafterPaymentProviderError, CurrenciesModule, DOM_EVENTS, DomEvents, EventEmitter, ForumModule, HelpcenterModule, HttpClient, IS_BOLD, IS_CODE, IS_HIGHLIGHT, IS_ITALIC, IS_STRIKETHROUGH, IS_SUBSCRIPT, IS_SUPERSCRIPT, IS_UNDERLINE, LegalModule, LicensesModule, LocalCartBackend, LocalStorageCartStore, LocalizationModule, LuckPermsModule, MoneyModule, PagesModule, PaymentErrorType, PaymentsModule, PostsModule, PunishmentsModule, RedeemCodeModule, ReportsModule, SDK_VERSION, SearchModule, SectionsModule, SeoModule, ServerCartBackend, ServerCartClient, ServersModule, StaffFormsModule, StatisticsModule, StoreModule, TicketsModule, UsersModule, VoteModule, WebsiteModule, cartStateFromServer, currencyDigits, index_default as default, discountedUnitPrice, dispatchDomEvent, formatMoney, htmlToLexical, isBalanceTopUpError, isCouponError, isCrafterError, isLexicalFormat, isOutOfStockError, isPaymentProviderError, legacyCartDiff, legalTermsHeaders, lexicalToHtml, lexicalToPlainText, lexicalToText, normalizeLines, normalizePaymentResponse, normalizeServerCart, parsePaymentStatus, parseTaxBreakdown, payWithQuote, readPageContext, stripLocalePrefix, toLexical, topUpMaxAmount };
 //# sourceMappingURL=index.mjs.map
 //# sourceMappingURL=index.mjs.map
