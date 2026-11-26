@@ -26,27 +26,32 @@ Kütüphane; tüm API uç noktalarını, DTO doğrulamalarını, token yaşam d�
 | **14** | [**Arama, SEO, LuckPerms & Site Bilgisi**](./14-search-seo-luckperms-website.md) | Canlı Canlı Navbar Arama (`search`), SEO Konfigürasyonu & Sitemap (`seo`), Oyun İçi Rank (`luckperms`), Site Bilgileri (`website`) |
 | **15** | [**Event Bus & Hata Yönetimi**](./15-events-and-errors.md) | Reaktif Event Dinleme (`crafter.on`), Hata Yakalama (`CrafterError`) ve Dual-Mode Mimarisi |
 | **16** | [**Lexical Zengin Metin Motoru (`crafter.utils`)**](./16-lexical-rich-text.md) | `lexicalToHtml`, `lexicalToText` (özet çıkarma) ve `toLexical` (otomatik sarmalama) |
+| **17** | [**Tema v2 çalışma zamanı (`window.Crafter`)**](./17-theme-runtime.md) | SDK'yı beklemek (`crafter:ready`), sunucu sepeti, `money.format`, `localization`, `sections.render`, `checkout()`, DOM olayları, örnek bölüm |
 
 ---
 
 ## ⚡ Hızlı Başlangıç
 
-### 1. Liquid Temalarda Kullanım (Storefront CDN)
-Storefront proxy üzerinden otomatik kimlik çözümlemesi yapılır (`websiteId` vermeniz gerekmez):
+### 1. Liquid Temalarda Kullanım (tema v2: SDK zorunlu, storefront ekler)
+Tema v2 sayfalarında storefront SDK'yı `{{ content_for_header }}` ile kendisi ekler ve başlatır; tema `<script src>` ya da
+`new Crafter()` yazmaz. `window.Crafter` hazır örnektir (ayrıntı: [17. Tema v2 çalışma zamanı](./17-theme-runtime.md)):
 
-```html
-<!-- theme.liquid içinde head veya body sonu -->
-<script src="/cdn/sdk/crafter.min.js"></script>
-<script>
-  // Global window.crafter otomatik hazırdır (veya new Crafter() ile başlatılır)
-  const crafter = new Crafter();
+```js
+// assets/theme.js
+function onCrafterReady(fn) {
+  if (window.Crafter && typeof window.Crafter.cart === 'object') fn(window.Crafter);
+  else document.addEventListener('crafter:ready', () => fn(window.Crafter), { once: true });
+}
 
-  // Örnek: Hafif bakiye kutusunu doldur
-  crafter.users.getBalance('me').then(res => {
-    document.querySelector('#user-balance').innerText = res.balance + ' ' + res.currency;
+onCrafterReady((Crafter) => {
+  // Örnek: Hafif bakiye kutusunu doldur (para biçimi SDK ile)
+  Crafter.users.getBalance('me').then((res) => {
+    document.querySelector('#user-balance').textContent = Crafter.money.format(res.balance, { convert: false });
   });
-</script>
+});
 ```
+
+v1 temalar ve harici sayfalar SDK'yı kendisi yükler: `<script src="https://unpkg.com/@crafter-cms/sdk@1.5.2/dist/crafter.min.js"></script>` ve `new Crafter()`.
 
 ### 2. Harici / Headless Uygulamalarda Kullanım (NPM / Modern Bundler)
 ```bash

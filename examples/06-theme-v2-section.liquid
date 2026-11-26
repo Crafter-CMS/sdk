@@ -1,0 +1,95 @@
+{%- comment -%}
+  Örnek: tema v2 bölümü + Crafter SDK (SDK 1.5+).
+  Dosya: sections/mini-cart.liquid. Şablona JSON'dan eklenir ({ "type": "mini-cart" }) ya da editörden.
+
+  - SDK'yı storefront {{ content_for_header }} ile kendisi ekler; bölüm <script src> ya da new Crafter() yazmaz.
+  - İlk görünüm sunucuda Liquid `cart` nesnesiyle çizilir (JS gerekmez).
+  - Değişiklikler Crafter.cart ile yapılır, bölüm Crafter.sections.render ile yeniden çizilir.
+  - Metinler dil dosyasından (| t); tutarlar money filtresiyle; checkout bağlantısı purpose ile ve locale_url'siz.
+  Gereken anahtarlar (locales/tr.default.json): mini_cart.title, mini_cart.empty, mini_cart.remove,
+  mini_cart.checkout, mini_cart.coupon_placeholder, mini_cart.coupon_apply
+{%- endcomment -%}
+
+<div class="mini-cart" data-mini-cart data-section-id="{{ section.id }}">
+  <h2>{% if section.settings.heading != blank %}{{ section.settings.heading }}{% else %}{{ 'mini_cart.title' | t }}{% endif %}</h2>
+
+  {%- if cart.item_count == 0 -%}
+    <p>{{ 'mini_cart.empty' | t }}</p>
+  {%- else -%}
+    <ul>
+      {%- for item in cart.items -%}
+        <li>
+          <span>{{ item.name }} × {{ item.quantity }}</span>
+          <span>{{ item.line_price | money }}</span>
+          <button type="button" data-remove="{{ item.id }}">{{ 'mini_cart.remove' | t }}</button>
+        </li>
+      {%- endfor -%}
+    </ul>
+    <p><strong>{{ cart.total_price | money }}</strong></p>
+
+    {%- if section.settings.show_coupon -%}
+      <form data-coupon>
+        <input name="code" placeholder="{{ 'mini_cart.coupon_placeholder' | t }}" required>
+        <button type="submit">{{ 'mini_cart.coupon_apply' | t }}</button>
+        <p data-coupon-error hidden></p>
+      </form>
+    {%- endif -%}
+
+    <a href="/checkout?purpose=cart" data-checkout>{{ 'mini_cart.checkout' | t }}</a>
+  {%- endif -%}
+</div>
+
+<script>
+  (function () {
+    var sectionId = {{ section.id | json }};
+
+    function onCrafterReady(fn) {
+      if (window.Crafter && typeof window.Crafter.cart === 'object') fn(window.Crafter);
+      else document.addEventListener('crafter:ready', function () { fn(window.Crafter); }, { once: true });
+    }
+
+    onCrafterReady(function (Crafter) {
+      var root = function () { return document.querySelector('[data-mini-cart][data-section-id="' + sectionId + '"]'); };
+      var rerender = function () {
+        return Crafter.sections.render([sectionId]).catch(function () { location.reload(); });
+      };
+
+      document.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-remove]');
+        if (!button || !root() || !root().contains(button)) return;
+        button.disabled = true;
+        // Başarıda crafter:cart:updated yayılır ve bölüm aşağıda yeniden çizilir
+        Crafter.cart.remove(button.getAttribute('data-remove')).catch(function () { button.disabled = false; });
+      });
+
+      document.addEventListener('submit', function (event) {
+        var form = event.target.closest('[data-coupon]');
+        if (!form || !root() || !root().contains(form)) return;
+        event.preventDefault();
+        var error = form.querySelector('[data-coupon-error]');
+        Crafter.cart.setCoupon(new FormData(form).get('code')).catch(function (err) {
+          // err.type: 'coupon_not_found', 'coupon_cart_total_below_minimum' (err.details.minCartValue) …
+          error.textContent = err && err.isCrafterError ? err.message : '';
+          error.hidden = !error.textContent;
+        });
+      });
+
+      // Sepet değişince (bu bölüm, başka bir bölüm ya da başka sekme) bölümü yeniden çiz
+      document.addEventListener('crafter:cart:updated', rerender);
+      // Editör bölümü yeniden çizdiğinde dinleyiciler belge düzeyinde olduğu için yeniden bağlamak gerekmez
+    });
+  })();
+</script>
+
+{% schema %}
+{
+  "name": "Mini cart",
+  "tag": "section",
+  "class": "section-mini-cart",
+  "settings": [
+    { "type": "text", "id": "heading", "label": "Heading" },
+    { "type": "checkbox", "id": "show_coupon", "label": "Show coupon field", "default": true }
+  ],
+  "presets": [{ "name": "Mini cart" }]
+}
+{% endschema %}

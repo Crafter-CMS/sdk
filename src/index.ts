@@ -61,6 +61,9 @@ export interface CheckoutNavigateOptions {
   navigate?: boolean;
 }
 
+/** Headless (direct) modda varsayılan API adresi */
+const DIRECT_API_BASE = 'https://api.crafter.net.tr';
+
 /** Önizleme / editör parametreleri checkout'a taşınır (tema önizlemesi doğru mağaza temasıyla açılsın) */
 const PREVIEW_PARAMS = ['themeId', 'preview_theme_id', 'preview_ts', 'preview_token'];
 
@@ -148,8 +151,11 @@ export class Crafter {
   };
 
   constructor(config: CrafterConfig = {}) {
+    // Varsayılan adres moda göre: direct → https://api.crafter.net.tr, storefront → /api/storefront (HttpClient ile aynı kural)
+    const mode = config.mode || (config.websiteId ? 'direct' : 'storefront');
     this.config = {
-      apiBase: '/api/storefront',
+      mode,
+      apiBase: mode === 'direct' ? DIRECT_API_BASE : '/api/storefront',
       ...config,
     };
 

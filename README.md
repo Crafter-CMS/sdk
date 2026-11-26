@@ -30,6 +30,7 @@ Her modülün ayrıntılı parametreleri, dönüş modelleri ve tema kodlama ör
 * 🔍 [**14. Arama, SEO, LuckPerms & Site Bilgisi**](./wiki/14-search-seo-luckperms-website.md) — Canlı Navbar Arama, SEO & Sitemap, Oyun İçi Rank
 * ⚡ [**15. Event Bus & Hata Yönetimi**](./wiki/15-events-and-errors.md) — Reaktif Olaylar (`crafter.on`), `CrafterError` ve Dual-Mode
 * ✍️ [**16. Lexical Zengin Metin Motoru (`crafter.utils`)**](./wiki/16-lexical-rich-text.md) — AST -> HTML/Text dönüştürücü ve Storefront Liquid filtresi eşleniği
+* 🧩 [**17. Tema v2 çalışma zamanı (`window.Crafter`)**](./wiki/17-theme-runtime.md) — `crafter:ready`, sunucu sepeti, para, dil, `sections.render`, checkout ve örnek bölüm
 
 ---
 
@@ -40,6 +41,8 @@ SDK'nın pratik entegrasyonlarını test etmek için hazır senaryolar:
 * [**`02-headless-node.ts`**](./examples/02-headless-node.ts) — Node.js / Headless modda doğrudan backend API çağrıları, LuckPerms ve SEO sitemap.
 * [**`03-lexical-showcase.html`**](./examples/03-lexical-showcase.html) — Tarayıcıda Lexical AST render ve HTML ➔ Lexical AST çift yönlü test sandbox'ı.
 * [**`04-tickets-and-forum.ts`**](./examples/04-tickets-and-forum.ts) — Destek talebi ve forum mesajlaşma iş akışları (otomatik Lexical dönüşümü).
+* [**`05-llc-checkout.html`**](./examples/05-llc-checkout.html) — Satıcı LLC sepet ödemesi (CrafterPayments), vergi kırılımı ve teslimat durumu.
+* [**`06-theme-v2-section.liquid`**](./examples/06-theme-v2-section.liquid) — Tema v2 bölümü: sunucuda çizilen mini sepet, `Crafter.cart`, `Crafter.sections.render`, kupon hatası ve checkout bağlantısı.
 
 ---
 
@@ -90,7 +93,7 @@ Sepet ve SDK olayları: `crafter:ready`, `crafter:cart:updated`, `crafter:locali
 `event.detail` ile). v1 temalar ve harici sayfalar SDK'yı eskisi gibi kendisi yükler:
 
 ```html
-<script src="https://unpkg.com/@crafter-cms/sdk@1.4.0/dist/crafter.min.js"></script>
+<script src="https://unpkg.com/@crafter-cms/sdk@1.5.2/dist/crafter.min.js"></script>
 <script>window.crafter = new Crafter();</script>
 ```
 

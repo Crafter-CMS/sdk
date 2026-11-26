@@ -1,5 +1,23 @@
 # Değişiklik Günlüğü
 
+## 1.5.2 — 2026-11-26
+
+Yayın hazırlığı (#255, #258). npm'deki son sürüm 1.1.0; 1.2.0–1.5.1 npm'e yayınlanmadı ve bu sürümle birlikte çıkar.
+Kıran değişiklik yok.
+
+### Düzeltilenler
+- Headless (`mode: 'direct'`) varsayılan API adresi: `Crafter` yapıcısı `apiBase`'i her modda `/api/storefront` ile
+  dolduruyordu; `new Crafter({ mode: 'direct', websiteId })` istekleri `https://api.crafter.net.tr` yerine göreli
+  `/api/storefront/website/...` adresine gidiyordu (Node'da çalışmıyordu). Varsayılan artık moda göre seçilir
+  (`direct` → `https://api.crafter.net.tr`, `storefront` → `/api/storefront`); `websiteId` verilip mod verilmezse
+  `config.mode` de `'direct'` olur. Verilen `apiBase` aynen korunur.
+
+### Belgeler
+- Wiki: `17-theme-runtime.md` (tema v2: `crafter:ready`, sunucu sepeti, `money`, `localization`, `sections.render`,
+  `checkout()`, DOM olayları). Wiki hızlı başlangıcı tema v2 kuralına göre güncellendi (tema SDK'yı kendisi yüklemez).
+- Örnek: `examples/06-theme-v2-section.liquid` (sunucuda çizilen mini sepet bölümü, `{% schema %}`, SDK ile güncelleme).
+- README: v1 / harici sayfa için sürümlü CDN adresi 1.5.2.
+
 ## 1.5.1 — 2026-11-24
 
 Kupon düzeltmesi (#476): storefront sepetinde kupon eklenirken hemen doğrulanır, sepet indirim ve toplamı döner, eski
