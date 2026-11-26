@@ -6,6 +6,8 @@
 
 Crafter Storefront ve Headless web uygulamaları için resmi JavaScript / TypeScript istemci kütüphanesidir.
 
+> Bu depoda ayrıca bağımsız bir paket bulunur: [`packages/js`](./packages/js/README.md) — `@crafterpayments/js`, CrafterPayments tarayıcı checkout paketi (yönlendirme, popup, modal, gömülü). Kendi `package.json`'ı, testleri ve sürümü vardır; kök paketin derlemesine ve yayınına girmez.
+
 Crafter Liquid temalarındaki hardcoded `fetch()` isteklerini ortadan kaldırmak, API versiyonlamasını (`v2` vs düz rotalar) soyutlamak, çift çalışma modunu (Liquid Storefront Proxy vs Harici Doğrudan Backend) otomatik yönetmek ve reaktif bir arayüz deneyimi sunmak amacıyla sıfırdan geliştirilmiştir.
 
 ---

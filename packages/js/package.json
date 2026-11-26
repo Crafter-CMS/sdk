@@ -1,0 +1,60 @@
+{
+  "name": "@crafterpayments/js",
+  "version": "0.1.0",
+  "description": "CrafterPayments browser SDK: redirect, popup, modal and embedded checkout.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "unpkg": "./dist/crafterpayments.umd.min.js",
+  "jsdelivr": "./dist/crafterpayments.umd.min.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test test/",
+    "size": "node scripts/size.mjs",
+    "sri": "node scripts/sri.mjs",
+    "sri:check": "node scripts/sri.mjs --check"
+  },
+  "keywords": [
+    "crafterpayments",
+    "crafter",
+    "checkout",
+    "payments",
+    "embedded-checkout"
+  ],
+  "author": "Crafter",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Crafter-CMS/sdk.git",
+    "directory": "packages/js"
+  },
+  "bugs": {
+    "url": "https://github.com/Crafter-CMS/sdk/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
