@@ -3294,9 +3294,10 @@ function swapSection(id, html) {
 }
 
 // src/version.ts
-var SDK_VERSION = "1.5.1";
+var SDK_VERSION = "1.5.2";
 
 // src/index.ts
+var DIRECT_API_BASE = "https://api.crafter.net.tr";
 var PREVIEW_PARAMS = ["themeId", "preview_theme_id", "preview_ts", "preview_token"];
 var Crafter = class _Crafter {
   static version = SDK_VERSION;
@@ -3378,8 +3379,10 @@ var Crafter = class _Crafter {
     }
   };
   constructor(config = {}) {
+    const mode = config.mode || (config.websiteId ? "direct" : "storefront");
     this.config = {
-      apiBase: "/api/storefront",
+      mode,
+      apiBase: mode === "direct" ? DIRECT_API_BASE : "/api/storefront",
       ...config
     };
     this.context = this.config.context ?? null;

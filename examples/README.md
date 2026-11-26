@@ -13,8 +13,11 @@ Bu dizin, `@crafter-cms/sdk` kütüphanesinin hem Liquid temalarında (Storefron
 | [**`03-lexical-showcase.html`**](./03-lexical-showcase.html) | **Tarayıcı / Lexical Test Alanı** | Lexical AST'yi tüm düğümleriyle (başlıklar, kontrol listeleri, tablolar, kod blokları, 8 bitmask formatı) HTML'e çevirme ve `htmlToLexical` çift yönlü dönüştürücü. |
 | [**`04-tickets-and-forum.ts`**](./04-tickets-and-forum.ts) | **TypeScript / API Entegrasyonu** | Destek talebi açma/yanıtlama/kapatma, forum konusu oluşturma ve mesajlaşma (otomatik Lexical zengin metin dönüşümü). |
 | [**`05-llc-checkout.html`**](./05-llc-checkout.html) | **Storefront (Liquid / HTML / JS)** | Satıcı LLC sepet ödemesi: CrafterPayments + Stripe Payment Element (Stripe.js tema tarafından yüklenir), Stripe Tax vergi kırılımı, `OUT_OF_STOCK` hatası, 3DS dönüşü ve teslimat durumu yoklaması. Stripe test kartı: `4242 4242 4242 4242`. |
+| [**`06-theme-v2-section.liquid`**](./06-theme-v2-section.liquid) | **Tema v2 bölümü (Liquid + `window.Crafter`)** | Sunucuda çizilen mini sepet (Liquid `cart`), `Crafter.cart.remove` / `setCoupon` (kupon hatası), `crafter:cart:updated` ile `Crafter.sections.render`, `purpose`lu checkout bağlantısı, `{% schema %}` ve preset. SDK 1.5+; tema SDK'yı kendisi yüklemez. |
 
 ---
+
+> `01` ve `05` SDK'yı sayfaya kendisi ekleyen v1 / harici sayfa örnekleridir. Tema v2'de storefront SDK'yı kendisi ekler; tema `new Crafter()` yazmaz (bkz. `06` ve [wiki 17](../wiki/17-theme-runtime.md)).
 
 ## 🚀 Örnekleri İnceleme ve Çalıştırma
 
