@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.5.3 — 2026-11-27
+
+Security fix for `lexicalToHtml`. No breaking changes for content written with the Crafter editor; upgrading is
+strongly recommended for every theme or headless store that renders rich text with the SDK.
+
+### Security
+- XSS in link URLs: `link` / `autolink` `url` was only HTML-escaped, so `javascript:`, `data:` and `vbscript:` hrefs
+  were rendered and ran script on click. URLs are now checked against an allowlist (`http`, `https`, `mailto`, `tel`,
+  relative paths, `?query`, `#anchor`) after trimming, removing whitespace / control characters, decoding HTML entities
+  and lowercasing; anything else becomes `href="#"`.
+- Image `src` is checked the same way (`http`, `https`, relative); an image with an unsafe source is not rendered.
+- Attribute / tag injection: heading `tag` (was interpolated as the tag name), `direction`, list `start`, image
+  `width` / `height`, table cell `colSpan` / `rowSpan` and `backgroundColor`, and code `language` were written into
+  markup without validation. They are now restricted to `h1`–`h6`, `ltr` / `rtl`, integers, plain CSS colors and simple
+  identifiers.
+- Inline `style` on text: only typographic properties with plain values are kept; `url()`, `expression()`,
+  `position`, CSS escapes and comments are dropped.
+- `target` is limited to `_blank`, `_self`, `_parent`, `_top`; `target="_blank"` always gets `rel="noopener noreferrer"`.
+
 ## 1.5.2 — 2026-11-26
 
 Release preparation (#255, #258) and a cart sync fix (#434). The latest version on npm is 1.1.0; 1.2.0–1.5.1 were not published to npm and ship together with this version.

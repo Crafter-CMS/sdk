@@ -53,6 +53,23 @@ The SDK ships a zero-dependency, two-way Lexical engine that is **100% compatibl
    * `linebreak` ➔ `<br />`
    * `tab` ➔ `<span style="white-space: pre-wrap;">\t</span>`
 
+### Output safety (1.5.3+)
+
+Product descriptions and posts are written by store staff, so the output of `lexicalToHtml` is treated as untrusted
+and is safe to assign to `innerHTML`:
+
+* All text and attribute values are HTML-escaped; no node type can emit raw HTML.
+* Link `href`: only `http:`, `https:`, `mailto:`, `tel:`, relative paths, `?query` and `#anchors`. Any other scheme
+  (`javascript:`, `data:`, `vbscript:`, `file:` ...) becomes `href="#"`. The check is done after trimming, removing
+  whitespace / control characters and decoding entities, so `JaVaScRiPt:`, `\tjavascript:` and `javascript&#58;` are caught.
+* Image `src`: only `http:`, `https:` and relative paths; otherwise the image is not rendered.
+* `target` must be `_blank`, `_self`, `_parent` or `_top`; `_blank` always gets `rel="noopener noreferrer"`.
+* Heading tags are limited to `h1`–`h6`, `dir` to `ltr`/`rtl`; `start`, `indent`, `width`, `height`, `colSpan`,
+  `rowSpan` must be integers; the code `language` must be a simple identifier.
+* Text `style` keeps only `color`, `background-color`, `font-size`, `font-family`, `font-weight`, `font-style`,
+  `line-height`, `letter-spacing`, `text-decoration`, `text-transform` and `white-space` with plain values;
+  `url()`, `expression()`, CSS escapes and comments are dropped. Table cell `backgroundColor` must be a plain color.
+
 ---
 
 ## 💡 Practical Usage Examples
