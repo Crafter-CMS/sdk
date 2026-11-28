@@ -14,6 +14,7 @@ This folder contains end-to-end working examples that show how to use the `@craf
 | [**`04-tickets-and-forum.ts`**](./04-tickets-and-forum.ts) | **TypeScript / API Integration** | Opening/replying to/closing support tickets, creating forum topics and messaging (automatic Lexical rich text conversion). |
 | [**`05-llc-checkout.html`**](./05-llc-checkout.html) | **Storefront (Liquid / HTML / JS)** | Seller LLC cart payment: CrafterPayments + Stripe Payment Element (Stripe.js is loaded by the theme), Stripe Tax breakdown, the `OUT_OF_STOCK` error, 3DS return and delivery status polling. Stripe test card: `4242 4242 4242 4242`. |
 | [**`06-theme-v2-section.liquid`**](./06-theme-v2-section.liquid) | **Theme v2 section (Liquid + `window.Crafter`)** | A server-rendered mini cart (Liquid `cart`), `Crafter.cart.remove` / `setCoupon` (coupon error), `Crafter.sections.render` on `crafter:cart:updated`, a checkout link with `purpose`, `{% schema %}` and a preset. SDK 1.5+; the theme does not load the SDK itself. |
+| [**`app-node/`**](./app-node/) | **Crafter app (Node.js / Express)** | App store app on your own server: OAuth install with PKCE, token refresh, `/v1/store` and `/v1/orders`, signed webhooks with de-duplication, `app.uninstalled`, and an embedded panel page verified with the JWKS. See its README. |
 
 ---
 

@@ -1,0 +1,16 @@
+{
+  "manifestVersion": 1,
+  "id": "example-orders-viewer",
+  "name": "Example Orders Viewer",
+  "version": "1.0.0",
+  "description": "Shows the store's latest orders in the Crafter panel. Example app for developers.",
+  "compatibleGames": ["*"],
+  "scopes": ["read_store", "read_orders", "webhooks:write"],
+  "settings": {
+    "type": "object",
+    "properties": {}
+  },
+  "events": ["app.installed", "app.uninstalled", "order.paid"],
+  "themeBlocks": [],
+  "connectors": []
+}
