@@ -48,13 +48,13 @@ The `/v1` API is served on its own host. OAuth endpoints and the JWKS are on the
 
 ### 1. Create the app in the panel
 
-In the Crafter panel (dev), open **Developer > Apps > New app**:
+In the Crafter panel (dev), open **Developer > Apps > Create app**:
 
 - **Kind**: `private` while you develop. A private app installs only on the one store you pick, is published without
   review, and may use `http://localhost` URLs. A `public` app needs `https` URLs and a review before stores can install it.
 - **App URL**: `http://localhost:3000/install`
-- **Redirect URI**: `http://localhost:3000/oauth/callback` (matched exactly, byte for byte)
-- **Embed URL**: `http://localhost:3000/embed`
+- **Redirect URLs**: `http://localhost:3000/oauth/callback` (matched exactly, byte for byte)
+- **Panel page URL**: `http://localhost:3000/embed`
 - **Webhook URL**: leave empty. The app creates its own endpoint per store through the API (see below).
 
 Copy the **client id** (`capp_…`) and the **client secret** (`crft_acs_…`). The secret is shown only once; rotate it in
@@ -84,7 +84,7 @@ Install the app from the store's **Apps** page in the panel. Crafter sends you t
 comes back to `/oauth/callback`. Open `http://localhost:3000/` to see the installed store, its `/v1/store` and
 `/v1/orders` responses, and buttons to refresh or revoke the tokens.
 
-Open the app from the store's Apps page to see the embedded page.
+Open the app from the store's Apps page to see the embedded page (the **Panel page URL**).
 
 ## Environment variables
 
