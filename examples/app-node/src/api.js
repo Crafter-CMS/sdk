@@ -88,6 +88,8 @@ export class CrafterApi {
     return this.request(websiteId, `/orders?${query}`);
   }
 
+  // Optional: extra webhook endpoints next to the app-level one (scope webhooks:write). Not used by this example.
+
   listWebhookEndpoints(websiteId) {
     return this.request(websiteId, '/webhook_endpoints');
   }

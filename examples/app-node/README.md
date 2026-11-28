@@ -5,16 +5,15 @@ A small app you can copy to start building on the Crafter app store. It runs on 
 - start the install with OAuth 2.0 + PKCE (`S256`) and exchange the code for tokens in the callback,
 - store tokens (in a local JSON file, **example only**) and refresh them before they expire,
 - call the public API: `GET /v1/store` and `GET /v1/orders` (with `Retry-After` handling on `429`),
-- create its own webhook endpoint and verify every delivery: `X-Crafter-Signature` HMAC, 5 minute timestamp
-  tolerance, timing-safe compare, de-duplication on `X-Crafter-Delivery`,
+- receive webhooks on the app's **Webhook URL** and verify every delivery: `X-Crafter-Signature` HMAC, 5 minute
+  timestamp tolerance, timing-safe compare, de-duplication on `X-Crafter-Delivery`,
 - serve an embedded page inside the Crafter panel and verify its session JWT against the JWKS with Node `crypto`,
 - delete the store's tokens when `app.uninstalled` arrives.
 
 Developer documentation: [Apps](https://docs.crafter.net.tr/en/developers/apps/overview).
 
-> **Not for production as is.** Tokens and webhook secrets are written to `data/tokens.json` in plain text. Use a
-> database and encrypt refresh tokens and secrets at rest. The local test pages (`/`, `/stores/...`) have no login and
-> answer only on `localhost`.
+> **Not for production as is.** Tokens are written to `data/tokens.json` in plain text. Use a database and encrypt
+> refresh tokens at rest. The local test pages (`/`, `/stores/...`) have no login and answer only on `localhost`.
 
 ## Requirements
 
@@ -30,7 +29,7 @@ Developer documentation: [Apps](https://docs.crafter.net.tr/en/developers/apps/o
 | `src/server.js` | Express routes: install, callback, webhooks, embedded page, local test pages |
 | `src/oauth.js` | PKCE, authorize URL, code exchange, refresh (single-flight per store), revoke |
 | `src/api.js` | `/v1` client: bearer token, `Crafter-Version`, one refresh on `401`, one wait on `429` |
-| `src/webhooks.js` | Signature verification and webhook endpoint setup through `/v1/webhook_endpoints` |
+| `src/webhooks.js` | Webhook signature verification |
 | `src/session-token.js` | Embedded page session token (EdDSA JWT) verification with the JWKS |
 | `src/token-store.js` | Local JSON file storage (example only) |
 | `crafter-app.json` | Sample manifest |
@@ -41,26 +40,29 @@ Developer documentation: [Apps](https://docs.crafter.net.tr/en/developers/apps/o
 | --- | --- | --- |
 | OAuth, JWKS (`CRAFTER_API_URL`) | `https://dev-api.crafter.net.tr` | `https://api.crafter.net.tr` |
 | Public API (`CRAFTER_V1_URL`) | `https://dev-api.crafterpayments.com/v1` | `https://api.crafterpayments.com/v1` |
+| Panel (`CRAFTER_PANEL_ORIGINS`) | `https://dev-app.crafter.net.tr` | `https://app.crafter.net.tr` |
 
 The `/v1` API is served on its own host. OAuth endpoints and the JWKS are on the Crafter API host.
 
 ## Setup against dev
 
+Start a tunnel first if you want webhooks, and use its `https` address as `<base>` below. Without a tunnel use
+`http://localhost:3000`; everything except webhooks works.
+
 ### 1. Create the app in the panel
 
-In the Crafter panel (dev), open **Developer > Apps > Create app**:
+In the dev panel (`https://dev-app.crafter.net.tr`), open **Developer > Apps > Create app**:
 
-- **Kind**: `private` while you develop. A private app installs only on the one store you pick, is published without
-  review, and may use `http://localhost` URLs. A `public` app needs `https` URLs and a review before stores can install it.
-- **App URL**: `http://localhost:3000/install`
-- **Redirect URLs**: `http://localhost:3000/oauth/callback` (matched exactly, byte for byte)
-- **Panel page URL**: `http://localhost:3000/embed`
-- **Webhook URL**: leave empty. The app creates its own endpoint per store through the API (see below).
+- **App type**: `Private` while you develop. A private app installs only on the one store you pick, is published
+  without review, and may use `http://localhost` URLs. A `Public` app needs `https` URLs and a review before stores
+  can install it.
+- **App URL**: `<base>/install`
+- **Redirect URLs**: `<base>/oauth/callback` (matched exactly, character for character)
+- **Panel page URL**: `<base>/embed`
+- **Webhook URL**: `<base>/webhooks/crafter` (must be a public `https` URL; leave it empty without a tunnel)
 
-Copy the **client id** (`capp_…`) and the **client secret** (`crft_acs_…`). The secret is shown only once; rotate it in
-the panel if you lose it.
-
-If you use a tunnel, use its `https` address instead of `http://localhost:3000` everywhere above.
+Copy the **client id** (`capp_…`), the **client secret** (`crft_acs_…`) and, if you set a Webhook URL, the **webhook
+secret** (`whsec_…`). Secrets are shown only once; rotate them in the panel if you lose them.
 
 ### 2. Publish a version with the manifest
 
@@ -72,7 +74,7 @@ published, and the app can request only the scopes of the published manifest.
 
 ```bash
 cd examples/app-node
-cp .env.example .env    # then fill in CRAFTER_CLIENT_ID and CRAFTER_CLIENT_SECRET
+cp .env.example .env    # then fill in the client id, client secret, webhook secret and APP_BASE_URL
 npm install
 npm start
 ```
@@ -80,9 +82,9 @@ npm start
 ### 4. Install
 
 Install the app from the store's **Apps** page in the panel. Crafter sends you to
-`<app URL>?store=<websiteId>&lang=<tr|en>`; the app starts OAuth, the panel shows the consent screen, and the browser
+`<App URL>?store=<websiteId>&lang=<tr|en>`; the app starts OAuth, the panel shows the consent screen, and the browser
 comes back to `/oauth/callback`. Open `http://localhost:3000/` to see the installed store, its `/v1/store` and
-`/v1/orders` responses, and buttons to refresh or revoke the tokens.
+`/v1/orders` responses, and buttons to refresh or revoke the tokens. The console shows the `app.installed` webhook.
 
 Open the app from the store's Apps page to see the embedded page (the **Panel page URL**).
 
@@ -92,13 +94,15 @@ Open the app from the store's Apps page to see the embedded page (the **Panel pa
 | --- | --- | --- | --- |
 | `CRAFTER_CLIENT_ID` | yes | | Client id from the panel (`capp_…`) |
 | `CRAFTER_CLIENT_SECRET` | yes | | Client secret from the panel (`crft_acs_…`). Keep it out of git and logs. |
+| `CRAFTER_WEBHOOK_SECRET` | for webhooks | | Webhook secret of the app (`whsec_…`), the same for every store |
+| `CRAFTER_WEBHOOK_SECRET_PREVIOUS` | no | | The old webhook secret during a rotation (Crafter signs with both for 24 hours) |
 | `APP_BASE_URL` | no | `http://localhost:3000` | Public base URL of this app. Webhooks need `https`. |
 | `PORT` | no | `3000` | Listen port |
 | `CRAFTER_API_URL` | no | `https://dev-api.crafter.net.tr` | OAuth and JWKS host |
 | `CRAFTER_V1_URL` | no | `https://dev-api.crafterpayments.com/v1` | Public API base URL |
-| `CRAFTER_SCOPES` | no | `read_store read_orders webhooks:write` | Scopes to request (subset of the published manifest) |
+| `CRAFTER_SCOPES` | no | `read_store read_orders` | Scopes to request (subset of the published manifest) |
 | `CRAFTER_SESSION_ISSUER` | no | `CRAFTER_API_URL` | Expected `iss` of embedded session tokens |
-| `CRAFTER_PANEL_ORIGINS` | no | `https://app.crafter.net.tr` | Origins allowed to frame `/embed` (CSP `frame-ancestors`); set it to the panel origin of the environment you test on |
+| `CRAFTER_PANEL_ORIGINS` | no | `https://dev-app.crafter.net.tr` | Origins allowed to frame `/embed` (CSP `frame-ancestors`) |
 | `DATA_FILE` | no | `./data/tokens.json` | Token file (example only) |
 
 ## How it works
@@ -124,7 +128,7 @@ Token response:
   "expires_in": 3600,
   "refresh_token": "crft_art_…",
   "refresh_token_expires_in": 7776000,
-  "scope": "read_store read_orders webhooks:write",
+  "scope": "read_store read_orders",
   "app_id": "example-orders-viewer",
   "store": { "id": "<websiteId>", "name": "…", "url": "…" }
 }
@@ -146,33 +150,35 @@ and `Crafter-Version: 2026-12`. On `401 app_token_invalid` the client refreshes 
 
 ### Webhooks
 
-Right after the install the app calls `POST /v1/webhook_endpoints` (scope `webhooks:write`, `Idempotency-Key`
-header) with its `https` URL and the events `app.installed`, `app.uninstalled` and `order.paid`. The response holds
-the endpoint's signing secret (`whsec_…`) once; the app stores it with the store's record.
+When a store installs the app, Crafter creates a webhook endpoint for the app's **Webhook URL** on that store. It is
+subscribed to the manifest's `events` that the store's granted scopes cover, plus `app.installed` and
+`app.uninstalled`, and it receives live and test-mode events alike (the body's `livemode` tells them apart). Every
+delivery is signed with the app's webhook secret, the same for every store, so the app needs no per-store setup.
+
+`app.installed` is sent on every install, also the first one. It is queued while the code is exchanged, so it can
+arrive before the callback has stored the tokens; the example only logs it.
 
 Each delivery is checked in this order:
 
 1. The signature: `X-Crafter-Signature: t=<unix seconds>,v1=<hex>` where `v1` is
    `HMAC-SHA256(secret, "<t>.<raw body>")`. Compared with `crypto.timingSafeEqual`. The header may hold several `v1`
-   values; any match is enough.
+   values (24 hours after a secret rotation); any match against `CRAFTER_WEBHOOK_SECRET` or
+   `CRAFTER_WEBHOOK_SECRET_PREVIOUS` is enough.
 2. The timestamp: rejected when more than 5 minutes away from the server clock.
 3. `X-Crafter-Delivery`: a delivery that was already handled gets `200` without being handled again (retries reuse
    the id).
 
-`app.uninstalled` deletes the store's tokens (Crafter has already revoked them).
+`app.uninstalled` deletes the store's tokens (Crafter has already revoked them). After it the store's endpoint is
+turned off; a reinstall turns it back on.
 
-Two things to know:
-
-- `app.installed` is queued while the code is exchanged, before the app can create its endpoint, so the first
-  install never delivers it. Treat a successful code exchange as the install. On a reinstall, the endpoint from the
-  earlier install still exists and does receive `app.installed`; the example keeps that endpoint when it still has
-  its secret, and replaces it otherwise.
-- The **Webhook URL** field in the panel is not used for deliveries yet. Create endpoints through the API as shown.
+Optional: an app with the `webhooks:write` scope can add more endpoints per store with `POST /v1/webhook_endpoints`
+(another URL or a subset of events). Each of those has its own secret, returned once on create. The example does not
+use them; `src/api.js` has the calls.
 
 ### Embedded page
 
-The panel loads `<embed URL>?session=<JWT>&store=<websiteId>&lang=<tr|en>` in a sandboxed iframe, with a new token
-on every load. `src/session-token.js`:
+The panel loads `<Panel page URL>?session=<JWT>&store=<websiteId>&lang=<tr|en>` in a sandboxed iframe, with a new
+token on every load. `src/session-token.js`:
 
 1. reads the header, requires `alg: EdDSA` and finds the key by `kid` in
    `GET {CRAFTER_API_URL}/apps/.well-known/jwks.json` (cached 5 minutes, refetched for an unknown `kid`),
@@ -191,7 +197,7 @@ A real app would verify the token once and then start its own session for the if
 
 - Secrets only in environment variables; `.env` and `data/` are in `.gitignore`.
 - Never log access tokens, refresh tokens, client or webhook secrets, session tokens or customer data.
-- Encrypt refresh tokens and webhook secrets at rest in production.
-- Verify the webhook signature over the raw body before reading anything else from it.
+- Encrypt refresh tokens at rest in production.
+- Verify the webhook signature over the raw body before acting on anything in it.
 - Ask only for the scopes you use. Personal data scopes (`read_customers`, `read_customers:limited`) need a reason
   in the manifest and get a second reviewer.

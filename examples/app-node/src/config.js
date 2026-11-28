@@ -34,15 +34,25 @@ export const config = {
   v1Url: stripSlash(optional('CRAFTER_V1_URL', 'https://dev-api.crafterpayments.com/v1')),
   /** Pin the API version you built against; fields are only added within a version. */
   apiVersion: '2026-12',
-  scopes: optional('CRAFTER_SCOPES', 'read_store read_orders webhooks:write')
+  scopes: optional('CRAFTER_SCOPES', 'read_store read_orders')
     .split(/\s+/)
     .filter(Boolean),
   sessionIssuer: stripSlash(optional('CRAFTER_SESSION_ISSUER', apiUrl)),
-  panelOrigins: optional('CRAFTER_PANEL_ORIGINS', 'https://app.crafter.net.tr')
+  /** The app's webhook signing secret from the panel (one secret for every store). */
+  webhookSecret: optional('CRAFTER_WEBHOOK_SECRET', ''),
+  /** During a rotation Crafter signs with both secrets for 24 hours; keep the old one here until then. */
+  webhookSecretPrevious: optional('CRAFTER_WEBHOOK_SECRET_PREVIOUS', ''),
+  panelOrigins: optional('CRAFTER_PANEL_ORIGINS', 'https://dev-app.crafter.net.tr')
     .split(/\s+/)
     .filter(Boolean),
   dataFile: optional('DATA_FILE', './data/tokens.json'),
 };
 
-/** Webhook endpoints must be public https URLs; Crafter refuses localhost and private addresses. */
-export const webhooksEnabled = config.webhookUrl.startsWith('https://');
+/**
+ * Webhooks reach the app only on a public https URL (Crafter never delivers to localhost or private addresses), and
+ * the app needs the webhook secret to verify them.
+ */
+export const webhooksEnabled = config.webhookUrl.startsWith('https://') && Boolean(config.webhookSecret);
+
+/** Secrets a delivery may be signed with: the current one and, during a rotation, the previous one. */
+export const webhookSecrets = [config.webhookSecret, config.webhookSecretPrevious].filter(Boolean);

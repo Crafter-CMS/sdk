@@ -1,5 +1,5 @@
 import express from 'express';
-import { config, webhooksEnabled } from './config.js';
+import { config, webhookSecrets, webhooksEnabled } from './config.js';
 import { TokenStore } from './token-store.js';
 import {
   OAuthError,
@@ -12,7 +12,7 @@ import {
   revokeToken,
 } from './oauth.js';
 import { CrafterApi, CrafterApiError } from './api.js';
-import { ensureWebhookEndpoint, verifySignature } from './webhooks.js';
+import { verifySignature } from './webhooks.js';
 import { SessionTokenError, verifySessionToken } from './session-token.js';
 import { html, ordersTable, page, raw } from './html.js';
 
@@ -21,7 +21,7 @@ import { html, ordersTable, page, raw } from './html.js';
  *
  *   GET  /install?store=<websiteId>   app URL: Crafter sends the store owner here to start the install
  *   GET  /oauth/callback              redirect URI: exchanges the code (PKCE) for tokens
- *   POST /webhooks/crafter            webhook endpoint: verifies, de-duplicates and handles events
+ *   POST /webhooks/crafter            Webhook URL: verifies, de-duplicates and handles events
  *   GET  /embed?session=&store=       embed URL: the page shown inside the Crafter panel
  *   GET  /                            local test pages (localhost only): installed stores, /v1 calls, refresh, revoke
  *
@@ -118,16 +118,8 @@ app.get('/oauth/callback', async (req, res) => {
     const response = await exchangeCode({ code, codeVerifier: pending.verifier });
     const websiteId = response.store.id;
     await store.saveTokens(websiteId, response);
+    // Crafter has already created this store's webhook endpoint for the app's Webhook URL; nothing to set up here
     console.log(`Installed on store ${websiteId} (app ${response.app_id}, scopes: ${response.scope})`);
-
-    try {
-      const result = await ensureWebhookEndpoint(api, store, websiteId);
-      if (result.skipped) console.log(`Webhook endpoint not created: ${result.skipped}`);
-      else console.log(`Webhook endpoint ${result.endpointId} ${result.reused ? 'kept' : 'created'} for ${websiteId}`);
-    } catch (endpointError) {
-      // The install itself worked; webhooks can be set up again on the next install
-      console.warn(`Webhook endpoint setup failed for ${websiteId}: ${endpointError.message}`);
-    }
 
     res.send(page('Installed', html`<h1>Installed</h1>
 <p>The app is installed on <strong>${response.store.name}</strong>.</p>
@@ -154,14 +146,12 @@ app.post('/webhooks/crafter', express.raw({ type: '*/*', limit: '1mb' }), async 
     return;
   }
 
-  // Pick the secret of the endpoint we created for this store; nothing in the body is trusted before the check
-  const websiteId = typeof event?.data?.websiteId === 'string' ? event.data.websiteId : null;
-  const endpoint = websiteId ? store.getWebhookEndpoint(websiteId) : null;
-  const signature = req.get('X-Crafter-Signature');
-  if (!endpoint || !verifySignature(rawBody, signature, [endpoint.secret])) {
+  // One secret for every store: the app's webhook secret (plus the previous one during a rotation)
+  if (!verifySignature(rawBody, req.get('X-Crafter-Signature'), webhookSecrets)) {
     res.status(400).json({ error: 'invalid_signature' });
     return;
   }
+  const websiteId = typeof event?.data?.websiteId === 'string' ? event.data.websiteId : null;
 
   // The same delivery id comes back on every retry: handle it once
   const deliveryId = req.get('X-Crafter-Delivery') || event.id;
@@ -190,15 +180,14 @@ app.post('/webhooks/crafter', express.raw({ type: '*/*', limit: '1mb' }), async 
 async function handleEvent(event, websiteId) {
   switch (event.event) {
     case 'app.uninstalled': {
-      // The tokens are already revoked on Crafter's side; forget them. The endpoint record (id + secret) stays so a
-      // reinstall can verify deliveries to the same endpoint.
+      // The tokens are already revoked on Crafter's side; forget them
       const deleted = await store.deleteInstallation(websiteId);
       console.log(`Uninstalled from store ${websiteId}${deleted ? '; tokens deleted' : ''}`);
       break;
     }
     case 'app.installed':
-      // Reaches only endpoints that already exist (a reinstall); the first install is the code exchange
-      console.log(`app.installed for store ${websiteId}`);
+      // Sent on every install, often before the code exchange has finished: do not expect tokens yet
+      console.log(`app.installed for store ${websiteId} (version ${event.data?.version})`);
       break;
     case 'order.paid':
       // Customer name and email are null unless the app holds read_customers; do not log them either way
@@ -255,7 +244,7 @@ ${raw(ordersTable(orders.data))}`));
 app.get('/', localOnly, (req, res) => {
   const items = store.listInstallations();
   res.send(page('Example app', html`<h1>Example Crafter app</h1>
-<p class="muted">Webhooks: ${webhooksEnabled ? config.webhookUrl : 'off (APP_BASE_URL is not https)'}</p>
+<p class="muted">Webhooks: ${webhooksEnabled ? config.webhookUrl : 'off (set an https APP_BASE_URL and CRAFTER_WEBHOOK_SECRET)'}</p>
 ${items.length
     ? raw(html`<ul>${items.map((item) => raw(html`<li><a href="/stores/${encodeURIComponent(item.websiteId)}">${item.store.name}</a> <span class="muted">${item.websiteId}</span></li>`))}</ul>`)
     : raw(html`<p>No store has installed the app yet. Install it from the Crafter panel.</p>`)}`));
@@ -311,5 +300,7 @@ app.get('/healthz', (req, res) => res.json({ ok: true }));
 app.listen(config.port, () => {
   console.log(`Example app on ${config.appBaseUrl} (port ${config.port})`);
   console.log(`Redirect URI: ${config.redirectUri}`);
-  if (!webhooksEnabled) console.log('Webhooks are off: set APP_BASE_URL to a public https URL to receive them.');
+  if (!webhooksEnabled)
+    console.log('Webhooks are off: set APP_BASE_URL to a public https URL and CRAFTER_WEBHOOK_SECRET to receive them.');
+  else console.log(`Webhook URL (set it on the app in the panel): ${config.webhookUrl}`);
 });

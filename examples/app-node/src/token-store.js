@@ -5,7 +5,7 @@ import { dirname } from 'node:path';
  * Token storage for the example: ONE LOCAL JSON FILE.
  *
  * This is only good enough to run the example on your machine. In production use a database, encrypt refresh tokens
- * and webhook secrets at rest (for example with a KMS key), and never log them. The file is written with mode 0600
+ * at rest (for example with a KMS key), and never log them. The file is written with mode 0600
  * and replaced atomically, but it is still plain text on disk.
  *
  * Shape:
@@ -19,7 +19,6 @@ import { dirname } from 'node:path';
  *       "installedAt"
  *     }
  *   },
- *   "webhookEndpoints": { "<websiteId>": { "id", "secret", "livemode" } },
  *   "deliveries": { "<X-Crafter-Delivery>": <received at, ms> }
  * }
  */
@@ -30,7 +29,7 @@ const DELIVERY_RETENTION_MS = 48 * 60 * 60 * 1000;
 export class TokenStore {
   constructor(file) {
     this.file = file;
-    this.data = { installations: {}, webhookEndpoints: {}, deliveries: {} };
+    this.data = { installations: {}, deliveries: {} };
     this.writing = Promise.resolve();
   }
 
@@ -39,7 +38,6 @@ export class TokenStore {
       const parsed = JSON.parse(await readFile(this.file, 'utf8'));
       this.data = {
         installations: parsed.installations ?? {},
-        webhookEndpoints: parsed.webhookEndpoints ?? {},
         deliveries: parsed.deliveries ?? {},
       };
     } catch (error) {
@@ -86,20 +84,6 @@ export class TokenStore {
     delete this.data.installations[websiteId];
     await this.save();
     return true;
-  }
-
-  getWebhookEndpoint(websiteId) {
-    return this.data.webhookEndpoints[websiteId] ?? null;
-  }
-
-  async saveWebhookEndpoint(websiteId, endpoint) {
-    this.data.webhookEndpoints[websiteId] = endpoint;
-    await this.save();
-  }
-
-  async deleteWebhookEndpoint(websiteId) {
-    delete this.data.webhookEndpoints[websiteId];
-    await this.save();
   }
 
   hasDelivery(id) {
