@@ -62,7 +62,8 @@ In the dev panel (`https://dev-app.crafter.net.tr`), open **Developer > Apps > C
 - **Webhook URL**: `<base>/webhooks/crafter` (must be a public `https` URL; leave it empty without a tunnel)
 
 Copy the **client id** (`capp_…`), the **client secret** (`crft_acs_…`) and, if you set a Webhook URL, the **webhook
-secret** (`whsec_…`). Secrets are shown only once; rotate them in the panel if you lose them.
+secret** (`whsec_…`). Secrets are shown only once; rotate them in the panel if you lose them. If you add the
+Webhook URL to an existing app, rotate the webhook secret once to see it.
 
 ### 2. Publish a version with the manifest
 
